@@ -1,0 +1,162 @@
+@import "tailwindcss";
+
+/*
+  PropFlow Design System
+  -----------------------
+  A restrained, ledger-inspired token system for a B2B real estate sales
+  platform. Two type roles: Geist Sans carries interface language, Geist
+  Mono carries every number that represents money, scores, or measurement —
+  the same way a financial statement sets figures in a fixed-width face so
+  columns of numbers stay legible and honest. This is the system's one
+  deliberate signature: KPIs, lead scores, deal values and match percentages
+  are always set in mono with tabular figures.
+
+  Palette is intentionally narrow. Cobalt is the only saturated color used
+  for interactive/brand moments. Amber is reserved exclusively for AI-
+  generated content, so a glance at the interface tells a user "a machine
+  produced this" without needing a label. Everything else is ink and paper.
+*/
+
+:root {
+  /* ---- Neutrals (paper/ink) ---- */
+  --canvas: #F6F7F9;       /* app background */
+  --surface: #FFFFFF;      /* cards, panels, table rows */
+  --surface-sunken: #FAFBFC; /* subtle recessed areas, table headers */
+  --border: #E5E8EC;
+  --border-strong: #D6DAE1;
+
+  --ink-900: #12151C;      /* primary text */
+  --ink-700: #3C4350;      /* headings on light, strong body */
+  --ink-500: #6B7280;      /* secondary text */
+  --ink-400: #8B93A1;      /* tertiary / placeholder */
+  --ink-300: #C1C6CE;      /* disabled / hairlines on dark */
+
+  /* ---- Brand (cobalt) ---- */
+  --brand-50:  #EEF2FF;
+  --brand-100: #DDE5FF;
+  --brand-500: #2C4CDB;    /* primary actions, active states, links */
+  --brand-600: #2340C0;
+  --brand-700: #1B339A;
+
+  /* ---- AI / signal (amber) — reserved for AI-originated content only ---- */
+  --signal-50:  #FBF3E4;
+  --signal-500: #B4791F;
+  --signal-600: #935F14;
+
+  /* ---- Semantic states ---- */
+  --success-50:  #E8F6EF;
+  --success-500: #157F51;
+  --warning-50:  #FBF3E3;
+  --warning-500: #B7791F;
+  --error-50:    #FBEAEA;
+  --error-500:   #C0362C;
+  --info-50:     #EEF2FF;
+  --info-500:    #2C4CDB;
+
+  /* ---- Priority (lead temperature) ---- */
+  --priority-hot:  #C0362C;
+  --priority-warm: #B7791F;
+  --priority-cold: #3C6FC4;
+
+  /* ---- Radius scale ---- */
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-panel: 16px;
+
+  /* ---- Elevation (restrained; border-led, shadow as accent only) ---- */
+  --shadow-xs: 0 1px 2px rgba(18, 21, 28, 0.04);
+  --shadow-sm: 0 1px 2px rgba(18, 21, 28, 0.04), 0 4px 10px -4px rgba(18, 21, 28, 0.06);
+  --shadow-md: 0 8px 24px -8px rgba(18, 21, 28, 0.12);
+  --shadow-popover: 0 12px 32px -8px rgba(18, 21, 28, 0.16), 0 0 0 1px rgba(18, 21, 28, 0.04);
+
+  --header-height: 60px;
+  --sidebar-width: 248px;
+  --sidebar-width-collapsed: 72px;
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+
+  --color-ink-900: var(--ink-900);
+  --color-ink-700: var(--ink-700);
+  --color-ink-500: var(--ink-500);
+  --color-ink-400: var(--ink-400);
+  --color-ink-300: var(--ink-300);
+
+  --color-brand-50: var(--brand-50);
+  --color-brand-100: var(--brand-100);
+  --color-brand-500: var(--brand-500);
+  --color-brand-600: var(--brand-600);
+  --color-brand-700: var(--brand-700);
+
+  --color-signal-50: var(--signal-50);
+  --color-signal-500: var(--signal-500);
+  --color-signal-600: var(--signal-600);
+
+  --color-success-50: var(--success-50);
+  --color-success-500: var(--success-500);
+  --color-warning-50: var(--warning-50);
+  --color-warning-500: var(--warning-500);
+  --color-error-50: var(--error-50);
+  --color-error-500: var(--error-500);
+  --color-info-50: var(--info-50);
+  --color-info-500: var(--info-500);
+
+  --color-priority-hot: var(--priority-hot);
+  --color-priority-warm: var(--priority-warm);
+  --color-priority-cold: var(--priority-cold);
+
+  --radius-control: var(--radius-control);
+  --radius-card: var(--radius-card);
+  --radius-panel: var(--radius-panel);
+}
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  height: 100%;
+}
+
+body {
+  min-height: 100%;
+  background: var(--canvas);
+  color: var(--ink-900);
+  font-feature-settings: "cv11", "ss01";
+}
+
+/* Tabular, lining figures wherever a number represents money, a score, or
+   a measurement — the system's signature typographic move. */
+.font-tabular {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-feature-settings: "tnum" 1, "zero" 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+::selection {
+  background: var(--brand-100);
+  color: var(--brand-700);
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand-500);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
