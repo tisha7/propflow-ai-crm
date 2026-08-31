@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   UserPlus,
   Users,
+  X,
 } from "lucide-react";
 import {
   useCallback,
@@ -26,7 +27,6 @@ type TeamRole =
 type Member = {
   id: string;
   full_name: string;
-  email?: string | null;
   role: TeamRole;
   organization_id: string;
   created_at: string;
@@ -38,18 +38,14 @@ const ROLE_OPTIONS: TeamRole[] = [
   "agent",
 ];
 
-function formatRole(
-  role: TeamRole,
-) {
+function formatRole(role: TeamRole) {
   return (
     role.charAt(0).toUpperCase() +
     role.slice(1)
   );
 }
 
-function roleClasses(
-  role: TeamRole,
-) {
+function roleClasses(role: TeamRole) {
   if (role === "admin") {
     return "border-purple-200 bg-purple-50 text-purple-700";
   }
@@ -67,237 +63,188 @@ export default function TeamPage() {
     [],
   );
 
-  const [
-    currentUserId,
-    setCurrentUserId,
-  ] = useState<string | null>(
-    null,
-  );
+  const [currentUserId, setCurrentUserId] =
+    useState<string | null>(null);
 
-  const [
-    currentRole,
-    setCurrentRole,
-  ] = useState<TeamRole | null>(
-    null,
-  );
+  const [currentRole, setCurrentRole] =
+    useState<TeamRole | null>(null);
 
-  const [
-    organizationId,
-    setOrganizationId,
-  ] = useState<string | null>(
-    null,
-  );
+  const [organizationId, setOrganizationId] =
+    useState<string | null>(null);
 
-  const [
-    members,
-    setMembers,
-  ] = useState<Member[]>([]);
+  const [members, setMembers] =
+    useState<Member[]>([]);
 
-  const [
-    loading,
-    setLoading,
-  ] = useState(true);
+  const [loading, setLoading] =
+    useState(true);
 
-  const [
-    error,
-    setError,
-  ] = useState("");
+  const [error, setError] =
+    useState("");
 
-  const [
-    success,
-    setSuccess,
-  ] = useState("");
+  const [success, setSuccess] =
+    useState("");
 
-  const [
-    search,
-    setSearch,
-  ] = useState("");
+  const [search, setSearch] =
+    useState("");
 
-  const [
-    roleFilter,
-    setRoleFilter,
-  ] = useState<
-    TeamRole | "all"
-  >("all");
+  const [roleFilter, setRoleFilter] =
+    useState<TeamRole | "all">("all");
 
-  const [
-    changingRoleId,
-    setChangingRoleId,
-  ] = useState<string | null>(
-    null,
-  );
+  const [changingRoleId, setChangingRoleId] =
+    useState<string | null>(null);
 
-  const loadTeam =
-    useCallback(
-      async () => {
-        setLoading(true);
-        setError("");
+  const [inviteOpen, setInviteOpen] =
+    useState(false);
 
-        const {
-          data: {
-            user,
-          },
-        } =
-          await supabase.auth.getUser();
+  const [inviteName, setInviteName] =
+    useState("");
 
-        if (!user) {
-          setError(
-            "Your session has expired. Please sign in again.",
-          );
-          setLoading(false);
-          return;
-        }
+  const [inviteEmail, setInviteEmail] =
+    useState("");
 
-        setCurrentUserId(
-          user.id,
-        );
+  const [inviteRole, setInviteRole] =
+    useState<TeamRole>("agent");
 
-        const {
-          data: myProfile,
-          error: myProfileError,
-        } =
-          await supabase
-            .from("profiles")
-            .select(
-              "id, organization_id, role",
-            )
-            .eq(
-              "id",
-              user.id,
-            )
-            .single();
+  const [inviting, setInviting] =
+    useState(false);
 
-        if (
-          myProfileError ||
-          !myProfile
-        ) {
-          setError(
-            myProfileError?.message ??
-              "Unable to load your profile.",
-          );
-          setLoading(false);
-          return;
-        }
+  const loadTeam = useCallback(async () => {
+    setLoading(true);
+    setError("");
 
-        setOrganizationId(
-          myProfile.organization_id,
-        );
-
-        setCurrentRole(
-          myProfile.role as TeamRole,
-        );
-
-        const {
-          data,
-          error: membersError,
-        } =
-          await supabase
-            .from("profiles")
-            .select(
-              "id, full_name, role, organization_id, created_at",
-            )
-            .eq(
-              "organization_id",
-              myProfile.organization_id,
-            )
-            .order(
-              "full_name",
-              {
-                ascending: true,
-              },
-            );
-
-        if (membersError) {
-          setError(
-            membersError.message,
-          );
-          setMembers([]);
-          setLoading(false);
-          return;
-        }
-
-        setMembers(
-          (data ??
-            []) as Member[],
-        );
-
-        setLoading(false);
+    const {
+      data: {
+        user,
       },
-      [supabase],
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      setError(
+        "Your session has expired. Please sign in again.",
+      );
+      setLoading(false);
+      return;
+    }
+
+    setCurrentUserId(user.id);
+
+    const {
+      data: myProfile,
+      error: myProfileError,
+    } = await supabase
+      .from("profiles")
+      .select(
+        "id, organization_id, role",
+      )
+      .eq("id", user.id)
+      .single();
+
+    if (
+      myProfileError ||
+      !myProfile
+    ) {
+      setError(
+        myProfileError?.message ??
+          "Unable to load your profile.",
+      );
+      setLoading(false);
+      return;
+    }
+
+    setOrganizationId(
+      myProfile.organization_id,
     );
 
+    setCurrentRole(
+      myProfile.role as TeamRole,
+    );
+
+    const {
+      data,
+      error: membersError,
+    } = await supabase
+      .from("profiles")
+      .select(
+        "id, full_name, role, organization_id, created_at",
+      )
+      .eq(
+        "organization_id",
+        myProfile.organization_id,
+      )
+      .order("full_name", {
+        ascending: true,
+      });
+
+    if (membersError) {
+      setError(membersError.message);
+      setMembers([]);
+      setLoading(false);
+      return;
+    }
+
+    setMembers(
+      (data ?? []) as Member[],
+    );
+
+    setLoading(false);
+  }, [supabase]);
+
   useEffect(() => {
-    const timer =
-      window.setTimeout(
-        () => {
-          void loadTeam();
-        },
-        0,
-      );
+    const timer = window.setTimeout(() => {
+      void loadTeam();
+    }, 0);
 
     return () =>
-      window.clearTimeout(
-        timer,
-      );
+      window.clearTimeout(timer);
   }, [loadTeam]);
 
   const isAdmin =
-    currentRole ===
-    "admin";
+    currentRole === "admin";
 
-  const filteredMembers =
-    useMemo(() => {
-      const query =
-        search
-          .trim()
-          .toLowerCase();
+  const filteredMembers = useMemo(() => {
+    const query = search
+      .trim()
+      .toLowerCase();
 
-      return members.filter(
-        (member) => {
-          const matchesRole =
-            roleFilter ===
-              "all" ||
-            member.role ===
-              roleFilter;
+    return members.filter((member) => {
+      const matchesRole =
+        roleFilter === "all" ||
+        member.role === roleFilter;
 
-          const matchesSearch =
-            !query ||
-            member.full_name
-              .toLowerCase()
-              .includes(query) ||
-            member.role
-              .toLowerCase()
-              .includes(query);
+      const matchesSearch =
+        !query ||
+        member.full_name
+          .toLowerCase()
+          .includes(query) ||
+        member.role
+          .toLowerCase()
+          .includes(query);
 
-          return (
-            matchesRole &&
-            matchesSearch
-          );
-        },
+      return (
+        matchesRole &&
+        matchesSearch
       );
-    }, [
-      members,
-      roleFilter,
-      search,
-    ]);
+    });
+  }, [
+    members,
+    roleFilter,
+    search,
+  ]);
 
   const counts = useMemo(
     () => ({
       all: members.length,
       admin: members.filter(
         (item) =>
-          item.role ===
-          "admin",
+          item.role === "admin",
       ).length,
       manager: members.filter(
         (item) =>
-          item.role ===
-          "manager",
+          item.role === "manager",
       ).length,
       agent: members.filter(
         (item) =>
-          item.role ===
-          "agent",
+          item.role === "agent",
       ).length,
     }),
     [members],
@@ -309,56 +256,41 @@ export default function TeamPage() {
   ) {
     if (
       !isAdmin ||
-      member.id ===
-        currentUserId ||
-      member.role ===
-        newRole
+      member.id === currentUserId ||
+      member.role === newRole
     ) {
       return;
     }
 
-    setChangingRoleId(
-      member.id,
-    );
+    setChangingRoleId(member.id);
     setError("");
     setSuccess("");
 
     const {
       error: roleError,
-    } =
-      await supabase.rpc(
-        "admin_change_member_role",
-        {
-          target_user_id:
-            member.id,
-          new_role:
-            newRole,
-        },
-      );
+    } = await supabase.rpc(
+      "admin_change_member_role",
+      {
+        target_user_id: member.id,
+        new_role: newRole,
+      },
+    );
 
     if (roleError) {
-      setError(
-        roleError.message,
-      );
-      setChangingRoleId(
-        null,
-      );
+      setError(roleError.message);
+      setChangingRoleId(null);
       return;
     }
 
-    setMembers(
-      (current) =>
-        current.map(
-          (item) =>
-            item.id ===
-            member.id
-              ? {
-                  ...item,
-                  role:
-                    newRole,
-                }
-              : item,
-        ),
+    setMembers((current) =>
+      current.map((item) =>
+        item.id === member.id
+          ? {
+              ...item,
+              role: newRole,
+            }
+          : item,
+      ),
     );
 
     setSuccess(
@@ -367,9 +299,111 @@ export default function TeamPage() {
       )}.`,
     );
 
-    setChangingRoleId(
-      null,
-    );
+    setChangingRoleId(null);
+  }
+
+  function openInviteModal() {
+    setError("");
+    setSuccess("");
+    setInviteName("");
+    setInviteEmail("");
+    setInviteRole("agent");
+    setInviteOpen(true);
+  }
+
+  function closeInviteModal() {
+    if (inviting) {
+      return;
+    }
+
+    setInviteOpen(false);
+    setInviteName("");
+    setInviteEmail("");
+    setInviteRole("agent");
+    setError("");
+  }
+
+  async function sendInvitation() {
+    const email =
+      inviteEmail
+        .trim()
+        .toLowerCase();
+
+    const fullName =
+      inviteName.trim();
+
+    if (!email) {
+      setError(
+        "Email address is required.",
+      );
+      return;
+    }
+
+    if (
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+        email,
+      )
+    ) {
+      setError(
+        "Please enter a valid email address.",
+      );
+      return;
+    }
+
+    setInviting(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const response =
+        await fetch(
+          "/api/team/invite",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              email,
+              fullName:
+                fullName || null,
+              role: inviteRole,
+            }),
+          },
+        );
+
+      const data =
+        (await response.json()) as {
+          error?: string;
+          message?: string;
+        };
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ??
+            "Unable to send invitation.",
+        );
+      }
+
+      setInviteOpen(false);
+      setInviteName("");
+      setInviteEmail("");
+      setInviteRole("agent");
+
+      setSuccess(
+        data.message ??
+          `Invitation sent to ${email}.`,
+      );
+    } catch (inviteError) {
+      setError(
+        inviteError instanceof Error
+          ? inviteError.message
+          : "Unable to send invitation.",
+      );
+    } finally {
+      setInviting(false);
+    }
   }
 
   if (loading) {
@@ -386,6 +420,7 @@ export default function TeamPage() {
         </div>
 
         <div className="h-32 animate-pulse rounded-xl border border-border bg-surface" />
+
         <div className="h-96 animate-pulse rounded-xl border border-border bg-surface" />
       </div>
     );
@@ -406,6 +441,7 @@ export default function TeamPage() {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -426,9 +462,8 @@ export default function TeamPage() {
         {isAdmin ? (
           <button
             type="button"
-            disabled
-            title="Invitation workflow is the next team phase"
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-4 text-sm font-medium text-ink-500 disabled:cursor-not-allowed disabled:opacity-70"
+            onClick={openInviteModal}
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-ink-900 px-4 text-sm font-medium text-white transition hover:opacity-90"
           >
             <UserPlus className="size-4" />
             Invite member
@@ -436,6 +471,7 @@ export default function TeamPage() {
         ) : null}
       </div>
 
+      {/* Non-admin notice */}
       {!isAdmin ? (
         <div className="rounded-xl border border-border bg-surface px-4 py-3">
           <div className="flex items-start gap-3">
@@ -447,19 +483,21 @@ export default function TeamPage() {
               </p>
 
               <p className="mt-1 text-xs leading-5 text-ink-400">
-                You can view your organization team, but only an Admin can change member roles.
+                You can view your organization team, but only an Admin can change member roles or invite new members.
               </p>
             </div>
           </div>
         </div>
       ) : null}
 
-      {error ? (
+      {/* Error */}
+      {error && !inviteOpen ? (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
       ) : null}
 
+      {/* Success */}
       {success ? (
         <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
           <Check className="size-4" />
@@ -467,36 +505,30 @@ export default function TeamPage() {
         </div>
       ) : null}
 
+      {/* Stats */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <TeamStat
           label="All members"
-          value={
-            counts.all
-          }
+          value={counts.all}
         />
 
         <TeamStat
           label="Admins"
-          value={
-            counts.admin
-          }
+          value={counts.admin}
         />
 
         <TeamStat
           label="Managers"
-          value={
-            counts.manager
-          }
+          value={counts.manager}
         />
 
         <TeamStat
           label="Agents"
-          value={
-            counts.agent
-          }
+          value={counts.agent}
         />
       </div>
 
+      {/* Members */}
       <section className="rounded-xl border border-border bg-surface">
         <div className="flex flex-col gap-3 border-b border-border p-4 lg:flex-row">
           <div className="relative flex-1">
@@ -504,12 +536,9 @@ export default function TeamPage() {
 
             <input
               value={search}
-              onChange={(
-                event,
-              ) =>
+              onChange={(event) =>
                 setSearch(
-                  event.target
-                    .value,
+                  event.target.value,
                 )
               }
               placeholder="Search team members..."
@@ -519,15 +548,10 @@ export default function TeamPage() {
 
           <div className="relative w-full lg:w-48">
             <select
-              value={
-                roleFilter
-              }
-              onChange={(
-                event,
-              ) =>
+              value={roleFilter}
+              onChange={(event) =>
                 setRoleFilter(
-                  event.target
-                    .value as
+                  event.target.value as
                     | TeamRole
                     | "all",
                 )
@@ -593,9 +617,7 @@ export default function TeamPage() {
 
               <tbody className="divide-y divide-border">
                 {filteredMembers.map(
-                  (
-                    member,
-                  ) => {
+                  (member) => {
                     const isCurrentUser =
                       member.id ===
                       currentUserId;
@@ -606,9 +628,7 @@ export default function TeamPage() {
 
                     return (
                       <tr
-                        key={
-                          member.id
-                        }
+                        key={member.id}
                         className="text-sm"
                       >
                         <td className="px-5 py-4">
@@ -657,11 +677,9 @@ export default function TeamPage() {
                               member.role,
                             )}`}
                           >
-                            {
-                              formatRole(
-                                member.role,
-                              )
-                            }
+                            {formatRole(
+                              member.role,
+                            )}
                           </span>
                         </td>
 
@@ -671,12 +689,9 @@ export default function TeamPage() {
                           ).toLocaleDateString(
                             undefined,
                             {
-                              month:
-                                "short",
-                              day:
-                                "numeric",
-                              year:
-                                "numeric",
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
                             },
                           )}
                         </td>
@@ -706,9 +721,7 @@ export default function TeamPage() {
                                   className="h-8 min-w-32 appearance-none rounded-lg border border-border bg-background px-3 pr-8 text-xs font-medium text-ink-700 outline-none disabled:opacity-60"
                                 >
                                   {ROLE_OPTIONS.map(
-                                    (
-                                      role,
-                                    ) => (
+                                    (role) => (
                                       <option
                                         key={
                                           role
@@ -750,6 +763,7 @@ export default function TeamPage() {
         )}
       </section>
 
+      {/* Role explanation */}
       <section className="grid gap-4 md:grid-cols-3">
         <RoleCard
           role="Admin"
@@ -767,10 +781,201 @@ export default function TeamPage() {
         />
       </section>
 
+      {/* Organization diagnostic */}
       {organizationId ? (
         <p className="text-[10px] text-ink-300">
           Organization: {organizationId}
         </p>
+      ) : null}
+
+      {/* Invite modal */}
+      {inviteOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6"
+          onMouseDown={(event) => {
+            if (
+              event.target ===
+              event.currentTarget
+            ) {
+              closeInviteModal();
+            }
+          }}
+        >
+          <div className="w-full max-w-md overflow-hidden rounded-2xl border border-border bg-surface shadow-xl">
+            {/* Modal header */}
+            <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+              <div>
+                <h2 className="text-base font-semibold text-ink-900">
+                  Invite team member
+                </h2>
+
+                <p className="mt-1 text-xs leading-5 text-ink-400">
+                  Send a secure invitation to join your PropFlow organization.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={
+                  closeInviteModal
+                }
+                disabled={
+                  inviting
+                }
+                className="flex size-8 items-center justify-center rounded-lg text-ink-400 hover:bg-surface-sunken hover:text-ink-700 disabled:opacity-50"
+                aria-label="Close invite modal"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            {/* Modal body */}
+            <div className="space-y-4 p-5">
+              <div className="space-y-2">
+                <label
+                  htmlFor="invite-name"
+                  className="text-sm font-medium text-ink-800"
+                >
+                  Full name
+                </label>
+
+                <input
+                  id="invite-name"
+                  value={inviteName}
+                  onChange={(event) =>
+                    setInviteName(
+                      event.target
+                        .value,
+                    )
+                  }
+                  placeholder="Michael Carter"
+                  autoComplete="name"
+                  disabled={inviting}
+                  className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-2 disabled:opacity-60"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label
+                  htmlFor="invite-email"
+                  className="text-sm font-medium text-ink-800"
+                >
+                  Work email
+                </label>
+
+                <input
+                  id="invite-email"
+                  type="email"
+                  value={inviteEmail}
+                  onChange={(event) =>
+                    setInviteEmail(
+                      event.target
+                        .value,
+                    )
+                  }
+                  placeholder="michael@realty.com"
+                  autoComplete="email"
+                  disabled={inviting}
+                  className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-2 disabled:opacity-60"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label
+                  htmlFor="invite-role"
+                  className="text-sm font-medium text-ink-800"
+                >
+                  Role
+                </label>
+
+                <div className="relative">
+                  <select
+                    id="invite-role"
+                    value={inviteRole}
+                    onChange={(
+                      event,
+                    ) =>
+                      setInviteRole(
+                        event.target
+                          .value as TeamRole,
+                      )
+                    }
+                    disabled={
+                      inviting
+                    }
+                    className="h-10 w-full appearance-none rounded-lg border border-border bg-background px-3 pr-9 text-sm outline-none disabled:opacity-60"
+                  >
+                    <option value="agent">
+                      Agent
+                    </option>
+
+                    <option value="manager">
+                      Manager
+                    </option>
+
+                    <option value="admin">
+                      Admin
+                    </option>
+                  </select>
+
+                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-ink-400" />
+                </div>
+              </div>
+
+              {error ? (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm leading-5 text-red-700">
+                  {error}
+                </div>
+              ) : null}
+
+              <div className="rounded-lg border border-border bg-surface-sunken px-3 py-2.5">
+                <p className="text-[11px] leading-5 text-ink-500">
+                  The invitation will be sent to the email above. The member will be added to your organization after accepting the invitation.
+                </p>
+              </div>
+            </div>
+
+            {/* Modal footer */}
+            <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+              <button
+                type="button"
+                onClick={
+                  closeInviteModal
+                }
+                disabled={
+                  inviting
+                }
+                className="h-9 rounded-lg border border-border px-4 text-sm font-medium text-ink-700 hover:bg-surface-sunken disabled:opacity-50"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  void sendInvitation()
+                }
+                disabled={
+                  inviting ||
+                  !inviteEmail.trim()
+                }
+                className="inline-flex h-9 items-center gap-2 rounded-lg bg-ink-900 px-4 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {inviting ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <UserPlus className="size-4" />
+                    Send invitation
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );
