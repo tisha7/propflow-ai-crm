@@ -1,5 +1,30 @@
 "use client";
 
+import Link from "next/link";
+import {
+  Activity,
+  ArrowLeft,
+  CalendarDays,
+  Check,
+  ChevronDown,
+  Clock3,
+  Copy,
+  Edit3,
+  Lightbulb,
+  Loader2,
+  Mail,
+  MapPin,
+  MessageCircle,
+  Phone,
+  Plus,
+  RefreshCw,
+  Save,
+  Send,
+  Sparkles,
+  Target,
+  Trash2,
+  X,
+} from "lucide-react";
 import {
   FormEvent,
   useCallback,
@@ -8,21 +33,67 @@ import {
   useState,
 } from "react";
 import {
-  ArrowLeft,
-  ChevronDown,
-  Mail,
-  MessageCircle,
-  Pencil,
-  Phone,
-  Plus,
-  Save,
-  Trash2,
-  UserPlus,
-  X,
-} from "lucide-react";
-import { useParams, useRouter } from "next/navigation";
+  useParams,
+  useRouter,
+} from "next/navigation";
 
 import { createClient } from "@/lib/supabase/client";
+
+type LeadStatus =
+  | "new"
+  | "contacted"
+  | "qualified"
+  | "property_matched"
+  | "site_visit"
+  | "negotiation"
+  | "won"
+  | "lost";
+
+type LeadPriority =
+  | "cold"
+  | "warm"
+  | "hot";
+
+type LeadSource =
+  | "facebook"
+  | "website"
+  | "google_ads"
+  | "referral"
+  | "property_portal"
+  | "manual"
+  | "other";
+
+type ActivityType =
+  | "call"
+  | "email"
+  | "whatsapp"
+  | "note"
+  | "property_sent"
+  | "status_changed"
+  | "site_visit";
+
+type FollowUpStatus =
+  | "pending"
+  | "completed"
+  | "cancelled";
+
+type AppointmentType =
+  | "property_viewing"
+  | "consultation"
+  | "negotiation"
+  | "follow_up";
+
+type AppointmentStatus =
+  | "scheduled"
+  | "completed"
+  | "cancelled"
+  | "rescheduled"
+  | "no_show";
+
+type MessageChannel =
+  | "whatsapp"
+  | "email"
+  | "sms";
 
 type Lead = {
   id: string;
@@ -30,15 +101,15 @@ type Lead = {
   full_name: string;
   email: string | null;
   phone: string | null;
-  source: string;
+  source: LeadSource;
   budget_min: number | null;
   budget_max: number | null;
   preferred_location: string | null;
   property_type: string | null;
   bedrooms: number | null;
   purchase_timeline: string | null;
-  status: string;
-  priority: string;
+  status: LeadStatus;
+  priority: LeadPriority;
   lead_score: number | null;
   assigned_agent_id: string | null;
   last_contacted_at: string | null;
@@ -48,24 +119,91 @@ type Lead = {
   updated_at: string;
 };
 
-type Profile = {
+type Agent = {
   id: string;
   full_name: string;
   role: string;
 };
 
-type Activity = {
+type ActivityItem = {
   id: string;
+  organization_id: string;
   lead_id: string;
   user_id: string | null;
-  type: string;
+  type: ActivityType;
   description: string | null;
   metadata: Record<string, unknown> | null;
   created_at: string;
-  actor_name?: string;
 };
 
-const STATUS_OPTIONS = [
+type Property = {
+  id: string;
+  title: string;
+  description: string | null;
+  property_type: string;
+  status: string;
+  price: number;
+  currency: string;
+  location: string;
+  address: string | null;
+  bedrooms: number | null;
+  bathrooms: number | null;
+  area: number | null;
+  area_unit: string | null;
+  image_url: string | null;
+};
+
+type Match = {
+  id: string;
+  lead_id: string;
+  property_id: string;
+  match_score: number | null;
+  match_reason: string | null;
+  created_at: string;
+  property: Property;
+};
+
+type FollowUp = {
+  id: string;
+  lead_id: string;
+  assigned_to: string | null;
+  due_at: string;
+  type: string;
+  notes: string | null;
+  status: FollowUpStatus;
+  completed_at: string | null;
+  created_at: string;
+};
+
+type Appointment = {
+  id: string;
+  lead_id: string;
+  property_id: string | null;
+  agent_id: string | null;
+  scheduled_at: string;
+  type: AppointmentType;
+  status: AppointmentStatus;
+  notes: string | null;
+};
+
+type AIAnalysis = {
+  id: string;
+  lead_id: string | null;
+  analysis_type:
+    | "lead_scoring"
+    | "lead_summary"
+    | "next_action"
+    | "message_generation"
+    | "property_match";
+  score: number | null;
+  priority: LeadPriority | null;
+  summary: string | null;
+  recommendation: string | null;
+  model: string | null;
+  created_at: string;
+};
+
+const STATUS_OPTIONS: LeadStatus[] = [
   "new",
   "contacted",
   "qualified",
@@ -74,11 +212,15 @@ const STATUS_OPTIONS = [
   "negotiation",
   "won",
   "lost",
-] as const;
+];
 
-const PRIORITY_OPTIONS = ["cold", "warm", "hot"] as const;
+const PRIORITY_OPTIONS: LeadPriority[] = [
+  "cold",
+  "warm",
+  "hot",
+];
 
-const SOURCE_OPTIONS = [
+const SOURCE_OPTIONS: LeadSource[] = [
   "facebook",
   "website",
   "google_ads",
@@ -86,9 +228,9 @@ const SOURCE_OPTIONS = [
   "property_portal",
   "manual",
   "other",
-] as const;
+];
 
-const ACTIVITY_OPTIONS = [
+const ACTIVITY_OPTIONS: ActivityType[] = [
   "call",
   "email",
   "whatsapp",
@@ -96,134 +238,1155 @@ const ACTIVITY_OPTIONS = [
   "property_sent",
   "status_changed",
   "site_visit",
-] as const;
+];
 
-function formatLabel(value: string) {
+const APPOINTMENT_TYPES: AppointmentType[] = [
+  "property_viewing",
+  "consultation",
+  "negotiation",
+  "follow_up",
+];
+
+function formatLabel(
+  value: string,
+) {
   return value
     .split("_")
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .map(
+      (word) =>
+        word.charAt(0).toUpperCase() +
+        word.slice(1),
+    )
     .join(" ");
 }
 
-function formatDate(value: string | null) {
-  if (!value) return "—";
-
-  return new Date(value).toLocaleString();
-}
-
-function formatBudget(
-  budgetMin: number | null,
-  budgetMax: number | null,
+function formatDate(
+  value: string | null,
 ) {
-  if (budgetMin == null && budgetMax == null) {
-    return "Not set";
+  if (!value) {
+    return "—";
   }
 
-  const min =
-    budgetMin != null ? Number(budgetMin).toLocaleString() : null;
+  const date =
+    new Date(value);
 
-  const max =
-    budgetMax != null ? Number(budgetMax).toLocaleString() : null;
+  if (
+    Number.isNaN(
+      date.getTime(),
+    )
+  ) {
+    return "—";
+  }
 
-  if (min && max) return `${min} – ${max}`;
-  if (min) return `From ${min}`;
-  return `Up to ${max}`;
+  return date.toLocaleString();
 }
 
-function getActivityIcon(type: string) {
-  if (type === "call") {
-    return <Phone className="size-4" />;
+function formatMoney(
+  value: number | null,
+  currency: string,
+) {
+  if (value == null) {
+    return "—";
   }
 
-  if (type === "email") {
-    return <Mail className="size-4" />;
+  return `${currency} ${Number(
+    value,
+  ).toLocaleString()}`;
+}
+
+function getPriorityClasses(
+  priority: LeadPriority,
+) {
+  if (
+    priority ===
+    "hot"
+  ) {
+    return "border-red-200 bg-red-50 text-red-700";
   }
 
-  if (type === "whatsapp") {
-    return <MessageCircle className="size-4" />;
+  if (
+    priority ===
+    "warm"
+  ) {
+    return "border-amber-200 bg-amber-50 text-amber-700";
   }
 
-  if (type === "site_visit") {
-    return <UserPlus className="size-4" />;
+  return "border-slate-200 bg-slate-50 text-slate-600";
+}
+
+function getStatusClasses(
+  status: LeadStatus,
+) {
+  if (
+    status ===
+      "won" ||
+    status ===
+      "qualified"
+  ) {
+    return "border-green-200 bg-green-50 text-green-700";
   }
 
-  return <MessageCircle className="size-4" />;
+  if (
+    status ===
+    "lost"
+  ) {
+    return "border-red-200 bg-red-50 text-red-700";
+  }
+
+  if (
+    status ===
+      "site_visit" ||
+    status ===
+      "negotiation"
+  ) {
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  }
+
+  return "border-slate-200 bg-slate-50 text-slate-600";
+}
+
+function getActivityIcon(
+  type: ActivityType,
+) {
+  if (
+    type ===
+    "call"
+  ) {
+    return (
+      <Phone className="size-4" />
+    );
+  }
+
+  if (
+    type ===
+    "email"
+  ) {
+    return (
+      <Mail className="size-4" />
+    );
+  }
+
+  if (
+    type ===
+    "whatsapp"
+  ) {
+    return (
+      <MessageCircle className="size-4" />
+    );
+  }
+
+  if (
+    type ===
+    "site_visit"
+  ) {
+    return (
+      <CalendarDays className="size-4" />
+    );
+  }
+
+  if (
+    type ===
+    "property_sent"
+  ) {
+    return (
+      <MapPin className="size-4" />
+    );
+  }
+
+  return (
+    <Activity className="size-4" />
+  );
+}
+
+function getMatchScoreClasses(
+  score: number | null,
+) {
+  if (score == null) {
+    return "border-border bg-surface-sunken text-ink-700";
+  }
+
+  if (score >= 80) {
+    return "border-green-200 bg-green-50 text-green-700";
+  }
+
+  if (score >= 60) {
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  }
+
+  return "border-red-200 bg-red-50 text-red-700";
+}
+
+function toDateTimeLocal(
+  value: string | null,
+) {
+  if (!value) {
+    return "";
+  }
+
+  const date =
+    new Date(value);
+
+  if (
+    Number.isNaN(
+      date.getTime(),
+    )
+  ) {
+    return "";
+  }
+
+  const year =
+    date.getFullYear();
+
+  const month =
+    String(
+      date.getMonth() + 1,
+    ).padStart(
+      2,
+      "0",
+    );
+
+  const day =
+    String(
+      date.getDate(),
+    ).padStart(
+      2,
+      "0",
+    );
+
+  const hours =
+    String(
+      date.getHours(),
+    ).padStart(
+      2,
+      "0",
+    );
+
+  const minutes =
+    String(
+      date.getMinutes(),
+    ).padStart(
+      2,
+      "0",
+    );
+
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
 export default function LeadDetailPage() {
-  const params = useParams<{ id: string }>();
-  const router = useRouter();
+  const params =
+    useParams<{
+      id: string;
+    }>();
 
-  const supabase = useMemo(() => createClient(), []);
-  const leadId = params.id;
+  const router =
+    useRouter();
 
-  const [lead, setLead] = useState<Lead | null>(null);
-  const [agents, setAgents] = useState<Profile[]>([]);
-  const [activities, setActivities] = useState<Activity[]>([]);
-
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [addingActivity, setAddingActivity] = useState(false);
-
-  const [editing, setEditing] = useState(false);
-  const [activityModalOpen, setActivityModalOpen] = useState(false);
-  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-
-  const [error, setError] = useState("");
-
-  const [fullName, setFullName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [source, setSource] = useState("manual");
-  const [budgetMin, setBudgetMin] = useState("");
-  const [budgetMax, setBudgetMax] = useState("");
-  const [preferredLocation, setPreferredLocation] = useState("");
-  const [propertyType, setPropertyType] = useState("");
-  const [bedrooms, setBedrooms] = useState("");
-  const [purchaseTimeline, setPurchaseTimeline] = useState("");
-  const [status, setStatus] = useState("new");
-  const [priority, setPriority] = useState("cold");
-  const [assignedAgentId, setAssignedAgentId] = useState("");
-  const [notes, setNotes] = useState("");
-
-  const [activityType, setActivityType] = useState("note");
-  const [activityDescription, setActivityDescription] = useState("");
-
-  const populateForm = useCallback((value: Lead) => {
-    setFullName(value.full_name);
-    setEmail(value.email ?? "");
-    setPhone(value.phone ?? "");
-    setSource(value.source);
-    setBudgetMin(
-      value.budget_min != null ? String(value.budget_min) : "",
+  const supabase =
+    useMemo(
+      () => createClient(),
+      [],
     );
-    setBudgetMax(
-      value.budget_max != null ? String(value.budget_max) : "",
-    );
-    setPreferredLocation(value.preferred_location ?? "");
-    setPropertyType(value.property_type ?? "");
-    setBedrooms(
-      value.bedrooms != null ? String(value.bedrooms) : "",
-    );
-    setPurchaseTimeline(value.purchase_timeline ?? "");
-    setStatus(value.status);
-    setPriority(value.priority);
-    setAssignedAgentId(value.assigned_agent_id ?? "");
-    setNotes(value.notes ?? "");
-  }, []);
 
-  const loadLeadData = useCallback(async () => {
-    setLoading(true);
+  const leadId =
+    params.id;
+
+  const [lead, setLead] =
+    useState<Lead | null>(
+      null,
+    );
+
+  const [agents, setAgents] =
+    useState<Agent[]>([]);
+
+  const [
+    activities,
+    setActivities,
+  ] = useState<
+    ActivityItem[]
+  >([]);
+
+  const [matches, setMatches] =
+    useState<Match[]>([]);
+
+  const [
+    followUps,
+    setFollowUps,
+  ] = useState<FollowUp[]>([]);
+
+  const [
+    appointments,
+    setAppointments,
+  ] = useState<
+    Appointment[]
+  >([]);
+
+  const [
+    aiAnalyses,
+    setAIAnalyses,
+  ] = useState<AIAnalysis[]>(
+    [],
+  );
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [
+    loadingMatched,
+    setLoadingMatched,
+  ] = useState(false);
+
+  const [
+    refreshingMatches,
+    setRefreshingMatches,
+  ] = useState(false);
+
+  const [saving, setSaving] =
+    useState(false);
+
+  const [
+    deleting,
+    setDeleting,
+  ] = useState(false);
+
+  const [error, setError] =
+    useState("");
+
+  const [
+    success,
+    setSuccess,
+  ] = useState("");
+
+  const [editing, setEditing] =
+    useState(false);
+
+  const [
+    deleteModalOpen,
+    setDeleteModalOpen,
+  ] = useState(false);
+
+  const [
+    activityModalOpen,
+    setActivityModalOpen,
+  ] = useState(false);
+
+  const [
+    followUpModalOpen,
+    setFollowUpModalOpen,
+  ] = useState(false);
+
+  const [
+    appointmentModalOpen,
+    setAppointmentModalOpen,
+  ] = useState(false);
+
+  const [
+    titleError,
+    setTitleError,
+  ] = useState("");
+
+  const [
+    currentTime,
+    setCurrentTime,
+  ] = useState<number | null>(
+    null,
+  );
+
+  const [
+    messageChannel,
+    setMessageChannel,
+  ] =
+    useState<MessageChannel>(
+      "whatsapp",
+    );
+
+  const [
+    generatingMessage,
+    setGeneratingMessage,
+  ] = useState(false);
+
+  const [
+    generatedMessage,
+    setGeneratedMessage,
+  ] = useState("");
+
+  const [
+    copiedMessage,
+    setCopiedMessage,
+  ] = useState(false);
+
+  const [fullName, setFullName] =
+    useState("");
+
+  const [email, setEmail] =
+    useState("");
+
+  const [phone, setPhone] =
+    useState("");
+
+  const [source, setSource] =
+    useState<LeadSource>(
+      "manual",
+    );
+
+  const [budgetMin, setBudgetMin] =
+    useState("");
+
+  const [budgetMax, setBudgetMax] =
+    useState("");
+
+  const [
+    preferredLocation,
+    setPreferredLocation,
+  ] = useState("");
+
+  const [
+    propertyType,
+    setPropertyType,
+  ] = useState("");
+
+  const [
+    bedrooms,
+    setBedrooms,
+  ] = useState("");
+
+  const [
+    purchaseTimeline,
+    setPurchaseTimeline,
+  ] = useState("");
+
+  const [status, setStatus] =
+    useState<LeadStatus>("new");
+
+  const [
+    priority,
+    setPriority,
+  ] = useState<LeadPriority>(
+    "cold",
+  );
+
+  const [
+    assignedAgentId,
+    setAssignedAgentId,
+  ] = useState("");
+
+  const [
+    nextFollowUpAt,
+    setNextFollowUpAt,
+  ] = useState("");
+
+  const [notes, setNotes] =
+    useState("");
+
+  const [
+    activityType,
+    setActivityType,
+  ] = useState<ActivityType>(
+    "note",
+  );
+
+  const [
+    activityDescription,
+    setActivityDescription,
+  ] = useState("");
+
+  const [
+    followUpAssignedTo,
+    setFollowUpAssignedTo,
+  ] = useState("");
+
+  const [
+    followUpDueAt,
+    setFollowUpDueAt,
+  ] = useState("");
+
+  const [
+    followUpType,
+    setFollowUpType,
+  ] = useState("general");
+
+  const [
+    followUpNotes,
+    setFollowUpNotes,
+  ] = useState("");
+
+  const [
+    appointmentPropertyId,
+    setAppointmentPropertyId,
+  ] = useState("");
+
+  const [
+    appointmentAgentId,
+    setAppointmentAgentId,
+  ] = useState("");
+
+  const [
+    appointmentScheduledAt,
+    setAppointmentScheduledAt,
+  ] = useState("");
+
+  const [
+    appointmentType,
+    setAppointmentType,
+  ] =
+    useState<AppointmentType>(
+      "property_viewing",
+    );
+
+  const [
+    appointmentNotes,
+    setAppointmentNotes,
+  ] = useState("");
+
+  const populateLeadForm =
+    useCallback(
+      (value: Lead) => {
+        setFullName(
+          value.full_name,
+        );
+
+        setEmail(
+          value.email ?? "",
+        );
+
+        setPhone(
+          value.phone ?? "",
+        );
+
+        setSource(
+          value.source,
+        );
+
+        setBudgetMin(
+          value.budget_min !=
+            null
+            ? String(
+                value.budget_min,
+              )
+            : "",
+        );
+
+        setBudgetMax(
+          value.budget_max !=
+            null
+            ? String(
+                value.budget_max,
+              )
+            : "",
+        );
+
+        setPreferredLocation(
+          value.preferred_location ??
+            "",
+        );
+
+        setPropertyType(
+          value.property_type ??
+            "",
+        );
+
+        setBedrooms(
+          value.bedrooms !=
+            null
+            ? String(
+                value.bedrooms,
+              )
+            : "",
+        );
+
+        setPurchaseTimeline(
+          value.purchase_timeline ??
+            "",
+        );
+
+        setStatus(
+          value.status,
+        );
+
+        setPriority(
+          value.priority,
+        );
+
+        setAssignedAgentId(
+          value.assigned_agent_id ??
+            "",
+        );
+
+        setNextFollowUpAt(
+          toDateTimeLocal(
+            value.next_follow_up_at,
+          ),
+        );
+
+        setNotes(
+          value.notes ?? "",
+        );
+      },
+      [],
+    );
+
+  const loadLead =
+    useCallback(
+      async () => {
+        setLoading(true);
+        setError("");
+
+        const leadResult =
+          await supabase
+            .from("leads")
+            .select(
+              `
+                id,
+                organization_id,
+                full_name,
+                email,
+                phone,
+                source,
+                budget_min,
+                budget_max,
+                preferred_location,
+                property_type,
+                bedrooms,
+                purchase_timeline,
+                status,
+                priority,
+                lead_score,
+                assigned_agent_id,
+                last_contacted_at,
+                next_follow_up_at,
+                notes,
+                created_at,
+                updated_at
+              `,
+            )
+            .eq(
+              "id",
+              leadId,
+            )
+            .single();
+
+        if (
+          leadResult.error
+        ) {
+          setLead(null);
+
+          setError(
+            leadResult.error.message,
+          );
+
+          setLoading(false);
+
+          return;
+        }
+
+        const loadedLead =
+          leadResult.data as Lead;
+
+        setLead(
+          loadedLead,
+        );
+
+        populateLeadForm(
+          loadedLead,
+        );
+
+        const [
+          agentsResult,
+          activitiesResult,
+          matchesResult,
+          followUpsResult,
+          appointmentsResult,
+          aiResult,
+        ] =
+          await Promise.all([
+            supabase
+              .from("profiles")
+              .select(
+                "id, full_name, role",
+              )
+              .order(
+                "full_name",
+                {
+                  ascending:
+                    true,
+                },
+              ),
+
+            supabase
+              .from("activities")
+              .select(
+                `
+                  id,
+                  organization_id,
+                  lead_id,
+                  user_id,
+                  type,
+                  description,
+                  metadata,
+                  created_at
+                `,
+              )
+              .eq(
+                "lead_id",
+                leadId,
+              )
+              .order(
+                "created_at",
+                {
+                  ascending:
+                    false,
+                },
+              ),
+
+            supabase
+              .from("lead_properties")
+              .select(
+                `
+                  id,
+                  lead_id,
+                  property_id,
+                  match_score,
+                  match_reason,
+                  created_at,
+                  property:properties (
+                    id,
+                    title,
+                    description,
+                    property_type,
+                    status,
+                    price,
+                    currency,
+                    location,
+                    address,
+                    bedrooms,
+                    bathrooms,
+                    area,
+                    area_unit,
+                    image_url
+                  )
+                `,
+              )
+              .eq(
+                "lead_id",
+                leadId,
+              )
+              .order(
+                "match_score",
+                {
+                  ascending:
+                    false,
+                  nullsFirst:
+                    false,
+                },
+              ),
+
+            supabase
+              .from("follow_ups")
+              .select(
+                `
+                  id,
+                  lead_id,
+                  assigned_to,
+                  due_at,
+                  type,
+                  notes,
+                  status,
+                  completed_at,
+                  created_at
+                `,
+              )
+              .eq(
+                "lead_id",
+                leadId,
+              )
+              .order(
+                "due_at",
+                {
+                  ascending:
+                    true,
+                },
+              ),
+
+            supabase
+              .from("appointments")
+              .select(
+                `
+                  id,
+                  lead_id,
+                  property_id,
+                  agent_id,
+                  scheduled_at,
+                  type,
+                  status,
+                  notes
+                `,
+              )
+              .eq(
+                "lead_id",
+                leadId,
+              )
+              .order(
+                "scheduled_at",
+                {
+                  ascending:
+                    true,
+                },
+              ),
+
+            supabase
+              .from("ai_analyses")
+              .select(
+                `
+                  id,
+                  lead_id,
+                  analysis_type,
+                  score,
+                  priority,
+                  summary,
+                  recommendation,
+                  model,
+                  created_at
+                `,
+              )
+              .eq(
+                "lead_id",
+                leadId,
+              )
+              .order(
+                "created_at",
+                {
+                  ascending:
+                    false,
+                },
+              ),
+          ]);
+
+        setAgents(
+          (agentsResult.data ??
+            []) as Agent[],
+        );
+
+        setActivities(
+          (activitiesResult.data ??
+            []) as ActivityItem[],
+        );
+
+        const rawMatches =
+          (matchesResult.data ??
+            []) as Array<
+            Omit<
+              Match,
+              "property"
+            > & {
+              property:
+                | Property
+                | Property[]
+                | null;
+            }
+          >;
+
+        setMatches(
+          rawMatches
+            .map(
+              (item) => {
+                const property =
+                  Array.isArray(
+                    item.property,
+                  )
+                    ? item
+                        .property[0]
+                    : item.property;
+
+                if (
+                  !property
+                ) {
+                  return null;
+                }
+
+                return {
+                  ...item,
+                  property,
+                };
+              },
+            )
+            .filter(
+              (
+                item,
+              ): item is Match =>
+                item !== null,
+            ),
+        );
+
+        setFollowUps(
+          (followUpsResult.data ??
+            []) as FollowUp[],
+        );
+
+        setAppointments(
+          (appointmentsResult.data ??
+            []) as Appointment[],
+        );
+
+        const loadedAnalyses =
+          (aiResult.data ??
+            []) as AIAnalysis[];
+
+        setAIAnalyses(
+          loadedAnalyses,
+        );
+
+        setCurrentTime(
+          Date.now(),
+        );
+
+        const latestMessage =
+          loadedAnalyses.find(
+            (analysis) =>
+              analysis.analysis_type ===
+              "message_generation",
+          );
+
+        setGeneratedMessage(
+          latestMessage?.recommendation ??
+            "",
+        );
+
+        setLoading(false);
+      },
+      [
+        leadId,
+        populateLeadForm,
+        supabase,
+      ],
+    );
+
+  useEffect(() => {
+    const timer =
+      window.setTimeout(
+        () => {
+          void loadLead();
+        },
+        0,
+      );
+
+    return () => {
+      window.clearTimeout(
+        timer,
+      );
+    };
+  }, [loadLead]);
+
+  const latestScore =
+    useMemo(
+      () =>
+        aiAnalyses.find(
+          (item) =>
+            item.analysis_type ===
+            "lead_scoring",
+        ) ?? null,
+      [aiAnalyses],
+    );
+
+  const latestSummary =
+    useMemo(
+      () =>
+        aiAnalyses.find(
+          (item) =>
+            item.analysis_type ===
+            "lead_summary",
+        ) ?? null,
+      [aiAnalyses],
+    );
+
+  const latestNextAction =
+    useMemo(
+      () =>
+        aiAnalyses.find(
+          (item) =>
+            item.analysis_type ===
+            "next_action",
+        ) ?? null,
+      [aiAnalyses],
+    );
+
+  const pendingFollowUps =
+    useMemo(
+      () =>
+        followUps.filter(
+          (item) =>
+            item.status ===
+            "pending",
+        ),
+      [followUps],
+    );
+
+  const upcomingAppointments =
+    useMemo(
+      () => {
+        if (
+          currentTime ===
+          null
+        ) {
+          return [];
+        }
+
+        return appointments
+          .filter(
+            (item) =>
+              (
+                item.status ===
+                  "scheduled" ||
+                item.status ===
+                  "rescheduled"
+              ) &&
+              new Date(
+                item.scheduled_at,
+              ).getTime() >=
+                currentTime,
+          )
+          .slice(
+            0,
+            5,
+          );
+      },
+      [
+        appointments,
+        currentTime,
+      ],
+    );
+
+  const matchCount =
+    matches.length;
+
+  async function addActivitySilently(
+    type: ActivityType,
+    description: string,
+  ) {
+    if (!lead) {
+      return;
+    }
+
+    const {
+      data: {
+        user,
+      },
+    } =
+      await supabase.auth.getUser();
+
+    await supabase
+      .from("activities")
+      .insert({
+        organization_id:
+          lead.organization_id,
+        lead_id:
+          lead.id,
+        user_id:
+          user?.id ??
+          null,
+        type,
+        description,
+        metadata:
+          null,
+      });
+  }
+
+  async function handleSave(
+    event: FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+
+    if (
+      !fullName.trim()
+    ) {
+      setTitleError(
+        "Lead name is required.",
+      );
+
+      return;
+    }
+
+    if (
+      budgetMin &&
+      budgetMax &&
+      Number(budgetMin) >
+        Number(budgetMax)
+    ) {
+      setTitleError(
+        "Minimum budget cannot exceed maximum budget.",
+      );
+
+      return;
+    }
+
+    setSaving(true);
     setError("");
+    setSuccess("");
+    setTitleError("");
 
-    const [
-      { data: leadData, error: leadError },
-      { data: profilesData, error: profilesError },
-      { data: activitiesData, error: activitiesError },
-    ] = await Promise.all([
-      supabase
+    const {
+      data,
+      error:
+        updateError,
+    } =
+      await supabase
         .from("leads")
+        .update({
+          full_name:
+            fullName.trim(),
+          email:
+            email.trim() ||
+            null,
+          phone:
+            phone.trim() ||
+            null,
+          source,
+          budget_min:
+            budgetMin
+              ? Number(
+                  budgetMin,
+                )
+              : null,
+          budget_max:
+            budgetMax
+              ? Number(
+                  budgetMax,
+                )
+              : null,
+          preferred_location:
+            preferredLocation.trim() ||
+            null,
+          property_type:
+            propertyType.trim() ||
+            null,
+          bedrooms:
+            bedrooms
+              ? Number(
+                  bedrooms,
+                )
+              : null,
+          purchase_timeline:
+            purchaseTimeline.trim() ||
+            null,
+          status,
+          priority,
+          assigned_agent_id:
+            assignedAgentId ||
+            null,
+          next_follow_up_at:
+            nextFollowUpAt
+              ? new Date(
+                  nextFollowUpAt,
+                ).toISOString()
+              : null,
+          notes:
+            notes.trim() ||
+            null,
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq(
+          "id",
+          leadId,
+        )
         .select(
           `
             id,
@@ -249,272 +1412,39 @@ export default function LeadDetailPage() {
             updated_at
           `,
         )
-        .eq("id", leadId)
-        .single(),
+        .single();
 
-      supabase
-        .from("profiles")
-        .select("id, full_name, role")
-        .order("full_name", { ascending: true }),
-
-      supabase
-        .from("activities")
-        .select(
-          `
-            id,
-            lead_id,
-            user_id,
-            type,
-            description,
-            metadata,
-            created_at
-          `,
-        )
-        .eq("lead_id", leadId)
-        .order("created_at", { ascending: false }),
-    ]);
-
-    if (leadError) {
-      setLead(null);
-      setActivities([]);
-      setAgents([]);
-      setError(leadError.message);
-      setLoading(false);
-      return;
-    }
-
-    if (profilesError) {
-      setAgents([]);
-    } else {
-      setAgents((profilesData ?? []) as Profile[]);
-    }
-
-    if (activitiesError) {
-      setActivities([]);
-    } else {
-      const activityRows = (activitiesData ?? []) as Activity[];
-
-      const actorIds = Array.from(
-        new Set(
-          activityRows
-            .map((activity) => activity.user_id)
-            .filter((id): id is string => Boolean(id)),
-        ),
+    if (
+      updateError
+    ) {
+      setError(
+        updateError.message,
       );
 
-      let actorMap = new Map<string, string>();
-
-      if (actorIds.length > 0) {
-        const { data: actors } = await supabase
-          .from("profiles")
-          .select("id, full_name")
-          .in("id", actorIds);
-
-        actorMap = new Map(
-          (actors ?? []).map((actor) => [
-            actor.id as string,
-            actor.full_name as string,
-          ]),
-        );
-      }
-
-      setActivities(
-        activityRows.map((activity) => ({
-          ...activity,
-          actor_name: activity.user_id
-            ? actorMap.get(activity.user_id) ?? "Team member"
-            : "System",
-        })),
-      );
-    }
-
-    const loadedLead = leadData as Lead;
-
-    setLead(loadedLead);
-    populateForm(loadedLead);
-    setLoading(false);
-  }, [leadId, populateForm, supabase]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void loadLeadData();
-    }, 0);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [loadLeadData]);
-
-  async function handleSave(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const name = fullName.trim();
-
-    if (!name) {
-      setError("Full name is required.");
-      return;
-    }
-
-    setSaving(true);
-    setError("");
-
-    const previousStatus = lead?.status ?? status;
-    const previousPriority = lead?.priority ?? priority;
-    const previousAssignedAgentId = lead?.assigned_agent_id ?? null;
-
-    const { data, error: updateError } = await supabase
-      .from("leads")
-      .update({
-        full_name: name,
-        email: email.trim() || null,
-        phone: phone.trim() || null,
-        source,
-        budget_min: budgetMin ? Number(budgetMin) : null,
-        budget_max: budgetMax ? Number(budgetMax) : null,
-        preferred_location: preferredLocation.trim() || null,
-        property_type: propertyType.trim() || null,
-        bedrooms: bedrooms ? Number(bedrooms) : null,
-        purchase_timeline: purchaseTimeline.trim() || null,
-        status,
-        priority,
-        assigned_agent_id: assignedAgentId || null,
-        notes: notes.trim() || null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", leadId)
-      .select(
-        `
-          id,
-          organization_id,
-          full_name,
-          email,
-          phone,
-          source,
-          budget_min,
-          budget_max,
-          preferred_location,
-          property_type,
-          bedrooms,
-          purchase_timeline,
-          status,
-          priority,
-          lead_score,
-          assigned_agent_id,
-          last_contacted_at,
-          next_follow_up_at,
-          notes,
-          created_at,
-          updated_at
-        `,
-      )
-      .single();
-
-    if (updateError) {
-      setError(updateError.message);
       setSaving(false);
+
       return;
     }
 
-    const updatedLead = data as Lead;
+    const updatedLead =
+      data as Lead;
 
-    setLead(updatedLead);
-    populateForm(updatedLead);
+    setLead(
+      updatedLead,
+    );
+
+    populateLeadForm(
+      updatedLead,
+    );
+
     setEditing(false);
-
-    const activityInserts: Array<{
-      organization_id: string;
-      lead_id: string;
-      user_id: string | null;
-      type: string;
-      description: string;
-      metadata: Record<string, unknown>;
-    }> = [];
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (status !== previousStatus) {
-      activityInserts.push({
-        organization_id: updatedLead.organization_id,
-        lead_id: leadId,
-        user_id: user?.id ?? null,
-        type: "status_changed",
-        description: `Status changed from ${formatLabel(previousStatus)} to ${formatLabel(status)}.`,
-        metadata: {
-          previous_status: previousStatus,
-          new_status: status,
-        },
-      });
-    }
-
-    if (priority !== previousPriority) {
-      activityInserts.push({
-        organization_id: updatedLead.organization_id,
-        lead_id: leadId,
-        user_id: user?.id ?? null,
-        type: "note",
-        description: `Priority changed from ${formatLabel(previousPriority)} to ${formatLabel(priority)}.`,
-        metadata: {
-          previous_priority: previousPriority,
-          new_priority: priority,
-        },
-      });
-    }
-
-    if (assignedAgentId !== previousAssignedAgentId) {
-      const newAgent = agents.find(
-        (agent) => agent.id === assignedAgentId,
-      );
-
-      activityInserts.push({
-        organization_id: updatedLead.organization_id,
-        lead_id: leadId,
-        user_id: user?.id ?? null,
-        type: "note",
-        description: newAgent
-          ? `Lead assigned to ${newAgent.full_name}.`
-          : "Lead assignment removed.",
-        metadata: {
-          previous_assigned_agent_id:
-            previousAssignedAgentId,
-          new_assigned_agent_id: assignedAgentId || null,
-        },
-      });
-    }
-
-    if (activityInserts.length > 0) {
-      const { error: activityError } = await supabase
-        .from("activities")
-        .insert(activityInserts);
-
-      if (!activityError) {
-        await loadLeadData();
-      }
-    }
-
     setSaving(false);
-  }
 
-  async function handleDelete() {
-    setDeleting(true);
-    setError("");
+    setSuccess(
+      "Lead updated successfully.",
+    );
 
-    const { error: deleteError } = await supabase
-      .from("leads")
-      .delete()
-      .eq("id", leadId);
-
-    if (deleteError) {
-      setError(deleteError.message);
-      setDeleting(false);
-      return;
-    }
-
-    setDeleteModalOpen(false);
-    setDeleting(false);
-    router.replace("/leads");
-    router.refresh();
+    await loadLead();
   }
 
   async function handleAddActivity(
@@ -522,107 +1452,978 @@ export default function LeadDetailPage() {
   ) {
     event.preventDefault();
 
-    const description = activityDescription.trim();
+    if (
+      !lead ||
+      !activityDescription.trim()
+    ) {
+      setError(
+        "Activity description is required.",
+      );
 
-    if (!description) {
-      setError("Activity description is required.");
       return;
     }
 
-    if (!lead) {
-      setError("Lead information is unavailable.");
-      return;
-    }
-
-    setAddingActivity(true);
+    setSaving(true);
     setError("");
 
     const {
-      data: { user },
-    } = await supabase.auth.getUser();
+      data: {
+        user,
+      },
+    } =
+      await supabase.auth.getUser();
 
-    const { error: activityError } = await supabase
-      .from("activities")
-      .insert({
-        organization_id: lead.organization_id,
-        lead_id: lead.id,
-        user_id: user?.id ?? null,
-        type: activityType,
-        description,
-        metadata: {
-          source: "lead_detail",
-        },
-      });
+    const {
+      error:
+        insertError,
+    } =
+      await supabase
+        .from("activities")
+        .insert({
+          organization_id:
+            lead.organization_id,
+          lead_id:
+            lead.id,
+          user_id:
+            user?.id ??
+            null,
+          type:
+            activityType,
+          description:
+            activityDescription.trim(),
+          metadata:
+            null,
+        });
 
-    if (activityError) {
-      setError(activityError.message);
-      setAddingActivity(false);
+    if (
+      insertError
+    ) {
+      setError(
+        insertError.message,
+      );
+
+      setSaving(false);
+
+      return;
+    }
+
+    setActivityType(
+      "note",
+    );
+
+    setActivityDescription(
+      "",
+    );
+
+    setActivityModalOpen(
+      false,
+    );
+
+    setSaving(false);
+
+    setSuccess(
+      "Activity added successfully.",
+    );
+
+    await loadLead();
+  }
+
+  async function handleAddFollowUp(
+    event: FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+
+    if (!lead) {
+      return;
+    }
+
+    if (!followUpDueAt) {
+      setError(
+        "Please select a follow-up date and time.",
+      );
+
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+
+    const dueAt =
+      new Date(
+        followUpDueAt,
+      ).toISOString();
+
+    const {
+      error:
+        insertError,
+    } =
+      await supabase
+        .from("follow_ups")
+        .insert({
+          organization_id:
+            lead.organization_id,
+          lead_id:
+            lead.id,
+          assigned_to:
+            followUpAssignedTo ||
+            null,
+          due_at:
+            dueAt,
+          type:
+            followUpType.trim() ||
+            "general",
+          notes:
+            followUpNotes.trim() ||
+            null,
+          status:
+            "pending",
+          completed_at:
+            null,
+        });
+
+    if (
+      insertError
+    ) {
+      setError(
+        insertError.message,
+      );
+
+      setSaving(false);
+
+      return;
+    }
+
+    await supabase
+      .from("leads")
+      .update({
+        next_follow_up_at:
+          dueAt,
+        updated_at:
+          new Date().toISOString(),
+      })
+      .eq(
+        "id",
+        lead.id,
+      );
+
+    setFollowUpAssignedTo(
+      assignedAgentId,
+    );
+
+    setFollowUpDueAt("");
+    setFollowUpType(
+      "general",
+    );
+    setFollowUpNotes("");
+
+    setFollowUpModalOpen(
+      false,
+    );
+
+    setSaving(false);
+
+    setSuccess(
+      "Follow-up scheduled successfully.",
+    );
+
+    await loadLead();
+  }
+
+  async function handleAddAppointment(
+    event: FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+
+    if (!lead) {
       return;
     }
 
     if (
-      activityType === "call" ||
-      activityType === "email" ||
-      activityType === "whatsapp"
+      !appointmentScheduledAt
     ) {
-      const now = new Date().toISOString();
+      setError(
+        "Please select an appointment date and time.",
+      );
 
-      const { data: updatedLead, error: contactUpdateError } =
-        await supabase
-          .from("leads")
-          .update({
-            last_contacted_at: now,
-            updated_at: now,
-          })
-          .eq("id", lead.id)
-          .select(
-            `
-              id,
-              organization_id,
-              full_name,
-              email,
-              phone,
-              source,
-              budget_min,
-              budget_max,
-              preferred_location,
-              property_type,
-              bedrooms,
-              purchase_timeline,
-              status,
-              priority,
-              lead_score,
-              assigned_agent_id,
-              last_contacted_at,
-              next_follow_up_at,
-              notes,
-              created_at,
-              updated_at
-            `,
-          )
-          .single();
+      return;
+    }
 
-      if (!contactUpdateError && updatedLead) {
-        const nextLead = updatedLead as Lead;
-        setLead(nextLead);
-        populateForm(nextLead);
+    setSaving(true);
+    setError("");
+
+    const scheduledAt =
+      new Date(
+        appointmentScheduledAt,
+      ).toISOString();
+
+    const {
+      error:
+        insertError,
+    } =
+      await supabase
+        .from("appointments")
+        .insert({
+          organization_id:
+            lead.organization_id,
+          lead_id:
+            lead.id,
+          property_id:
+            appointmentPropertyId ||
+            null,
+          agent_id:
+            appointmentAgentId ||
+            assignedAgentId ||
+            null,
+          scheduled_at:
+            scheduledAt,
+          type:
+            appointmentType,
+          status:
+            "scheduled",
+          notes:
+            appointmentNotes.trim() ||
+            null,
+        });
+
+    if (
+      insertError
+    ) {
+      setError(
+        insertError.message,
+      );
+
+      setSaving(false);
+
+      return;
+    }
+
+    await addActivitySilently(
+      "site_visit",
+      `Appointment scheduled for ${formatDate(
+        scheduledAt,
+      )}.`,
+    );
+
+    setAppointmentPropertyId(
+      "",
+    );
+
+    setAppointmentAgentId(
+      assignedAgentId,
+    );
+
+    setAppointmentScheduledAt(
+      "",
+    );
+
+    setAppointmentType(
+      "property_viewing",
+    );
+
+    setAppointmentNotes(
+      "",
+    );
+
+    setAppointmentModalOpen(
+      false,
+    );
+
+    setSaving(false);
+
+    setSuccess(
+      "Appointment scheduled successfully.",
+    );
+
+    await loadLead();
+  }
+
+  async function handleCompleteFollowUp(
+    followUpId: string,
+  ) {
+    const {
+      error:
+        updateError,
+    } =
+      await supabase
+        .from("follow_ups")
+        .update({
+          status:
+            "completed",
+          completed_at:
+            new Date().toISOString(),
+        })
+        .eq(
+          "id",
+          followUpId,
+        );
+
+    if (
+      updateError
+    ) {
+      setError(
+        updateError.message,
+      );
+
+      return;
+    }
+
+    setSuccess(
+      "Follow-up completed.",
+    );
+
+    await loadLead();
+  }
+
+  async function handleDeleteFollowUp(
+    followUpId: string,
+  ) {
+    const {
+      error:
+        deleteError,
+    } =
+      await supabase
+        .from("follow_ups")
+        .delete()
+        .eq(
+          "id",
+          followUpId,
+        );
+
+    if (
+      deleteError
+    ) {
+      setError(
+        deleteError.message,
+      );
+
+      return;
+    }
+
+    setSuccess(
+      "Follow-up deleted.",
+    );
+
+    await loadLead();
+  }
+
+  async function handleDeleteAppointment(
+    appointmentId: string,
+  ) {
+    const {
+      error:
+        deleteError,
+    } =
+      await supabase
+        .from("appointments")
+        .delete()
+        .eq(
+          "id",
+          appointmentId,
+        );
+
+    if (
+      deleteError
+    ) {
+      setError(
+        deleteError.message,
+      );
+
+      return;
+    }
+
+    setSuccess(
+      "Appointment deleted.",
+    );
+
+    await loadLead();
+  }
+
+  async function handleAIAnalysis(
+    analysisType:
+      | "lead_scoring"
+      | "lead_summary"
+      | "next_action",
+  ) {
+    if (!lead) {
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+
+    try {
+      const response =
+        await fetch(
+          "/api/ai/lead-analysis",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              leadId:
+                lead.id,
+              analysisType,
+            }),
+          },
+        );
+
+      const result =
+        (await response.json()) as {
+          error?: string;
+        };
+
+      if (
+        !response.ok
+      ) {
+        throw new Error(
+          result.error ??
+            "AI analysis failed.",
+        );
+      }
+
+      setSuccess(
+        analysisType ===
+          "lead_scoring"
+          ? "AI lead scoring completed."
+          : analysisType ===
+              "lead_summary"
+            ? "AI lead summary generated."
+            : "AI next action generated.",
+      );
+
+      await loadLead();
+    } catch (
+      analysisError
+    ) {
+      setError(
+        analysisError instanceof
+          Error
+          ? analysisError.message
+          : "AI analysis failed.",
+      );
+    }
+  }
+
+  async function handleGenerateMessage() {
+    if (!lead) {
+      return;
+    }
+
+    setGeneratingMessage(
+      true,
+    );
+
+    setError("");
+    setSuccess("");
+    setCopiedMessage(
+      false,
+    );
+
+    try {
+      const response =
+        await fetch(
+          "/api/ai/lead-analysis",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              leadId:
+                lead.id,
+              analysisType:
+                "message_generation",
+              channel:
+                messageChannel,
+            }),
+          },
+        );
+
+      const result =
+        (await response.json()) as {
+          error?: string;
+          analysis?: {
+            recommendation?: string | null;
+          };
+        };
+
+      if (
+        !response.ok
+      ) {
+        throw new Error(
+          result.error ??
+            "Message generation failed.",
+        );
+      }
+
+      const message =
+        result.analysis
+          ?.recommendation ??
+        "";
+
+      if (!message) {
+        throw new Error(
+          "AI did not return a message.",
+        );
+      }
+
+      setGeneratedMessage(
+        message,
+      );
+
+      setSuccess(
+        `${formatLabel(
+          messageChannel,
+        )} message generated successfully.`,
+      );
+
+      await loadLead();
+    } catch (
+      messageError
+    ) {
+      setError(
+        messageError instanceof
+          Error
+          ? messageError.message
+          : "Message generation failed.",
+      );
+    } finally {
+      setGeneratingMessage(
+        false,
+      );
+    }
+  }
+
+  async function handleCopyMessage() {
+    if (
+      !generatedMessage
+    ) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(
+        generatedMessage,
+      );
+
+      setCopiedMessage(
+        true,
+      );
+
+      window.setTimeout(
+        () => {
+          setCopiedMessage(
+            false,
+          );
+        },
+        1800,
+      );
+    } catch {
+      setError(
+        "Unable to copy the message.",
+      );
+    }
+  }
+
+  async function handleDeleteLead() {
+    setDeleting(true);
+    setError("");
+
+    const {
+      error:
+        deleteError,
+    } =
+      await supabase
+        .from("leads")
+        .delete()
+        .eq(
+          "id",
+          leadId,
+        );
+
+    if (
+      deleteError
+    ) {
+      setError(
+        deleteError.message,
+      );
+
+      setDeleting(false);
+
+      return;
+    }
+
+    setDeleteModalOpen(
+      false,
+    );
+
+    setDeleting(false);
+
+    router.replace(
+      "/leads",
+    );
+
+    router.refresh();
+  }
+
+  function calculateMatchScore(
+    currentLead: Lead,
+    property: Property,
+  ) {
+    let score = 0;
+
+    const reasons: string[] =
+      [];
+
+    if (
+      currentLead.budget_min !=
+        null ||
+      currentLead.budget_max !=
+        null
+    ) {
+      const min =
+        currentLead.budget_min ??
+        0;
+
+      const max =
+        currentLead.budget_max ??
+        Number.POSITIVE_INFINITY;
+
+      if (
+        property.price >=
+          min &&
+        property.price <=
+          max
+      ) {
+        score += 30;
+
+        reasons.push(
+          "Budget matches",
+        );
       }
     }
 
-    setActivityDescription("");
-    setActivityType("note");
-    setActivityModalOpen(false);
-    setAddingActivity(false);
+    if (
+      currentLead.preferred_location &&
+      property.location
+        .toLowerCase()
+        .includes(
+          currentLead.preferred_location.toLowerCase(),
+        )
+    ) {
+      score += 25;
 
-    await loadLeadData();
+      reasons.push(
+        "Location matches",
+      );
+    }
+
+    if (
+      currentLead.property_type &&
+      property.property_type
+        .toLowerCase()
+        .includes(
+          currentLead.property_type.toLowerCase(),
+        )
+    ) {
+      score += 20;
+
+      reasons.push(
+        "Property type matches",
+      );
+    }
+
+    if (
+      currentLead.bedrooms !=
+        null &&
+      property.bedrooms !=
+        null &&
+      property.bedrooms >=
+        currentLead.bedrooms
+    ) {
+      score += 15;
+
+      reasons.push(
+        "Bedroom requirement matches",
+      );
+    }
+
+    if (
+      property.status ===
+      "available"
+    ) {
+      score += 10;
+
+      reasons.push(
+        "Property is available",
+      );
+    }
+
+    return {
+      score: Math.min(
+        100,
+        score,
+      ),
+      reason:
+        reasons.length
+          ? reasons.join(
+              " • ",
+            )
+          : "General property match",
+    };
   }
 
-  function cancelEditing() {
-    if (!lead) return;
+  async function handleRefreshMatches() {
+    if (!lead) {
+      return;
+    }
 
-    populateForm(lead);
+    setRefreshingMatches(
+      true,
+    );
+
+    setLoadingMatched(
+      true,
+    );
+
     setError("");
-    setEditing(false);
+    setSuccess("");
+
+    const {
+      data: propertyData,
+      error:
+        propertyError,
+    } =
+      await supabase
+        .from("properties")
+        .select(
+          `
+            id,
+            title,
+            description,
+            property_type,
+            status,
+            price,
+            currency,
+            location,
+            address,
+            bedrooms,
+            bathrooms,
+            area,
+            area_unit,
+            image_url
+          `,
+        )
+        .eq(
+          "status",
+          "available",
+        )
+        .limit(100);
+
+    if (
+      propertyError
+    ) {
+      setError(
+        propertyError.message,
+      );
+
+      setRefreshingMatches(
+        false,
+      );
+
+      setLoadingMatched(
+        false,
+      );
+
+      return;
+    }
+
+    const properties =
+      (propertyData ??
+        []) as Property[];
+
+    const ranked =
+      properties
+        .map(
+          (property) => ({
+            property,
+            ...calculateMatchScore(
+              lead,
+              property,
+            ),
+          }),
+        )
+        .filter(
+          (item) =>
+            item.score > 0,
+        )
+        .sort(
+          (a, b) =>
+            b.score -
+            a.score,
+        )
+        .slice(
+          0,
+          12,
+        );
+
+    const {
+      error:
+        deleteError,
+    } =
+      await supabase
+        .from(
+          "lead_properties",
+        )
+        .delete()
+        .eq(
+          "lead_id",
+          lead.id,
+        );
+
+    if (
+      deleteError
+    ) {
+      setError(
+        deleteError.message,
+      );
+
+      setRefreshingMatches(
+        false,
+      );
+
+      setLoadingMatched(
+        false,
+      );
+
+      return;
+    }
+
+    if (
+      ranked.length >
+      0
+    ) {
+      const rows =
+        ranked.map(
+          (item) => ({
+            lead_id:
+              lead.id,
+            property_id:
+              item.property.id,
+            match_score:
+              item.score,
+            match_reason:
+              item.reason,
+          }),
+        );
+
+      const {
+        error:
+          insertError,
+      } =
+        await supabase
+          .from(
+            "lead_properties",
+          )
+          .insert(rows);
+
+      if (
+        insertError
+      ) {
+        setError(
+          insertError.message,
+        );
+
+        setRefreshingMatches(
+          false,
+        );
+
+        setLoadingMatched(
+          false,
+        );
+
+        return;
+      }
+    }
+
+    await addActivitySilently(
+      "property_sent",
+      `${ranked.length} property matches refreshed.`,
+    );
+
+    if (
+      ranked.length >
+        0 &&
+      lead.status ===
+        "qualified"
+    ) {
+      await supabase
+        .from("leads")
+        .update({
+          status:
+            "property_matched",
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq(
+          "id",
+          lead.id,
+        );
+    }
+
+    setSuccess(
+      ranked.length >
+        0
+        ? `${ranked.length} property matches refreshed.`
+        : "No matching available properties found.",
+    );
+
+    setRefreshingMatches(
+      false,
+    );
+
+    setLoadingMatched(
+      false,
+    );
+
+    await loadLead();
+  }
+
+  async function handleUnmatch(
+    matchId: string,
+  ) {
+    const {
+      error:
+        deleteError,
+    } =
+      await supabase
+        .from(
+          "lead_properties",
+        )
+        .delete()
+        .eq(
+          "id",
+          matchId,
+        );
+
+    if (
+      deleteError
+    ) {
+      setError(
+        deleteError.message,
+      );
+
+      return;
+    }
+
+    setSuccess(
+      "Property removed from matched properties.",
+    );
+
+    await loadLead();
   }
 
   if (loading) {
@@ -636,17 +2437,17 @@ export default function LeadDetailPage() {
   if (!lead) {
     return (
       <div className="space-y-4">
-        <button
-          type="button"
-          onClick={() => router.push("/leads")}
+        <Link
+          href="/leads"
           className="inline-flex items-center gap-2 text-sm text-ink-500 hover:text-ink-900"
         >
           <ArrowLeft className="size-4" />
           Back to leads
-        </button>
+        </Link>
 
         <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
-          {error || "Lead not found."}
+          {error ||
+            "Lead not found."}
         </div>
       </div>
     );
@@ -656,60 +2457,61 @@ export default function LeadDetailPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <button
-            type="button"
-            onClick={() => router.push("/leads")}
+          <Link
+            href="/leads"
             className="mb-3 inline-flex items-center gap-2 text-sm text-ink-500 hover:text-ink-900"
           >
             <ArrowLeft className="size-4" />
             Back to leads
-          </button>
+          </Link>
 
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-semibold tracking-tight text-ink-900">
               {lead.full_name}
             </h1>
 
-            <span className="rounded-full border border-border px-2.5 py-1 text-xs font-medium">
-              {formatLabel(lead.status)}
+            <span
+              className={`rounded-full border px-2.5 py-1 text-xs font-medium ${getStatusClasses(
+                lead.status,
+              )}`}
+            >
+              {formatLabel(
+                lead.status,
+              )}
             </span>
 
-            <span className="rounded-full border border-border px-2.5 py-1 text-xs font-medium">
-              {formatLabel(lead.priority)}
+            <span
+              className={`rounded-full border px-2.5 py-1 text-xs font-medium ${getPriorityClasses(
+                lead.priority,
+              )}`}
+            >
+              {formatLabel(
+                lead.priority,
+              )}
             </span>
           </div>
-
-          <p className="mt-1 text-sm text-ink-400">
-            Lead details, qualification, status, ownership, and activity.
-          </p>
         </div>
 
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => {
-              setError("");
-              setEditing(true);
-            }}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-ink-900 px-4 text-sm font-medium text-white hover:opacity-90"
+            onClick={() =>
+              setEditing(true)
+            }
+            className="inline-flex h-9 items-center gap-2 rounded-lg bg-ink-900 px-4 text-sm font-medium text-white"
           >
-            <Pencil className="size-4" />
+            <Edit3 className="size-4" />
             Edit lead
           </button>
 
           <button
             type="button"
-            onClick={() => setActivityModalOpen(true)}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-4 text-sm font-medium text-ink-700 hover:bg-surface-sunken"
-          >
-            <Plus className="size-4" />
-            Add activity
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setDeleteModalOpen(true)}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-medium text-red-700 hover:bg-red-100"
+            onClick={() =>
+              setDeleteModalOpen(
+                true,
+              )
+            }
+            className="inline-flex h-9 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-medium text-red-700"
           >
             <Trash2 className="size-4" />
             Delete
@@ -723,384 +2525,1520 @@ export default function LeadDetailPage() {
         </div>
       ) : null}
 
+      {success ? (
+        <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+          {success}
+        </div>
+      ) : null}
+
       {editing ? (
         <form
-          onSubmit={handleSave}
+          onSubmit={
+            handleSave
+          }
           className="rounded-xl border border-border bg-surface p-5"
         >
           <div className="grid gap-5 sm:grid-cols-2">
             <Field
               label="Full name"
-              value={fullName}
-              onChange={setFullName}
+              value={
+                fullName
+              }
+              onChange={
+                setFullName
+              }
               required
             />
 
             <Field
               label="Email"
+              value={
+                email
+              }
+              onChange={
+                setEmail
+              }
               type="email"
-              value={email}
-              onChange={setEmail}
             />
 
             <Field
               label="Phone"
-              value={phone}
-              onChange={setPhone}
+              value={
+                phone
+              }
+              onChange={
+                setPhone
+              }
             />
 
             <SelectField
               label="Source"
-              value={source}
-              onChange={setSource}
-              options={SOURCE_OPTIONS}
+              value={
+                source
+              }
+              onChange={(
+                value,
+              ) =>
+                setSource(
+                  value as LeadSource,
+                )
+              }
+              options={
+                SOURCE_OPTIONS
+              }
             />
 
             <Field
-              label="Minimum budget"
+              label="Budget minimum"
+              value={
+                budgetMin
+              }
+              onChange={
+                setBudgetMin
+              }
               type="number"
-              value={budgetMin}
-              onChange={setBudgetMin}
             />
 
             <Field
-              label="Maximum budget"
+              label="Budget maximum"
+              value={
+                budgetMax
+              }
+              onChange={
+                setBudgetMax
+              }
               type="number"
-              value={budgetMax}
-              onChange={setBudgetMax}
             />
 
             <Field
               label="Preferred location"
-              value={preferredLocation}
-              onChange={setPreferredLocation}
+              value={
+                preferredLocation
+              }
+              onChange={
+                setPreferredLocation
+              }
             />
 
             <Field
               label="Property type"
-              value={propertyType}
-              onChange={setPropertyType}
+              value={
+                propertyType
+              }
+              onChange={
+                setPropertyType
+              }
             />
 
             <Field
               label="Bedrooms"
+              value={
+                bedrooms
+              }
+              onChange={
+                setBedrooms
+              }
               type="number"
-              value={bedrooms}
-              onChange={setBedrooms}
             />
 
             <Field
               label="Purchase timeline"
-              value={purchaseTimeline}
-              onChange={setPurchaseTimeline}
+              value={
+                purchaseTimeline
+              }
+              onChange={
+                setPurchaseTimeline
+              }
             />
 
             <SelectField
               label="Status"
-              value={status}
-              onChange={setStatus}
-              options={STATUS_OPTIONS}
+              value={
+                status
+              }
+              onChange={(
+                value,
+              ) =>
+                setStatus(
+                  value as LeadStatus,
+                )
+              }
+              options={
+                STATUS_OPTIONS
+              }
             />
 
             <SelectField
               label="Priority"
-              value={priority}
-              onChange={setPriority}
-              options={PRIORITY_OPTIONS}
+              value={
+                priority
+              }
+              onChange={(
+                value,
+              ) =>
+                setPriority(
+                  value as LeadPriority,
+                )
+              }
+              options={
+                PRIORITY_OPTIONS
+              }
             />
 
             <SelectField
               label="Assigned agent"
-              value={assignedAgentId}
-              onChange={setAssignedAgentId}
-              options={["", ...agents.map((agent) => agent.id)]}
+              value={
+                assignedAgentId
+              }
+              onChange={
+                setAssignedAgentId
+              }
+              options={[
+                "",
+                ...agents.map(
+                  (
+                    agent,
+                  ) =>
+                    agent.id,
+                ),
+              ]}
               optionLabels={{
                 "": "Unassigned",
                 ...Object.fromEntries(
-                  agents.map((agent) => [
-                    agent.id,
-                    `${agent.full_name} (${formatLabel(agent.role)})`,
-                  ]),
+                  agents.map(
+                    (
+                      agent,
+                    ) => [
+                      agent.id,
+                      agent.full_name,
+                    ],
+                  ),
                 ),
               }}
             />
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-ink-800">
+                Next follow-up
+              </label>
+
+              <input
+                type="datetime-local"
+                value={
+                  nextFollowUpAt
+                }
+                onChange={(
+                  event,
+                ) =>
+                  setNextFollowUpAt(
+                    event.target.value,
+                  )
+                }
+                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm"
+              />
+            </div>
           </div>
 
           <div className="mt-5 space-y-2">
-            <label
-              htmlFor="lead-detail-notes"
-              className="text-sm font-medium text-ink-800"
-            >
+            <label className="text-sm font-medium text-ink-800">
               Notes
             </label>
 
             <textarea
-              id="lead-detail-notes"
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-              rows={6}
-              className="w-full resize-y rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:ring-2"
+              value={
+                notes
+              }
+              onChange={(
+                event,
+              ) =>
+                setNotes(
+                  event.target.value,
+                )
+              }
+              rows={5}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm"
             />
           </div>
 
-          <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-border pt-4">
+          {titleError ? (
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">
+              {titleError}
+            </div>
+          ) : null}
+
+          <div className="mt-5 flex justify-end gap-2 border-t border-border pt-4">
             <button
               type="button"
-              onClick={cancelEditing}
-              disabled={saving}
-              className="inline-flex h-9 items-center gap-2 rounded-lg border border-border px-4 text-sm font-medium text-ink-700 hover:bg-surface-sunken disabled:opacity-50"
+              onClick={() => {
+                populateLeadForm(
+                  lead,
+                );
+
+                setEditing(
+                  false,
+                );
+              }}
+              className="h-9 rounded-lg border border-border px-4 text-sm font-medium text-ink-700"
             >
-              <X className="size-4" />
               Cancel
             </button>
 
             <button
               type="submit"
-              disabled={saving}
-              className="inline-flex h-9 items-center gap-2 rounded-lg bg-ink-900 px-4 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={
+                saving
+              }
+              className="inline-flex h-9 items-center gap-2 rounded-lg bg-ink-900 px-4 text-sm font-medium text-white disabled:opacity-50"
             >
-              <Save className="size-4" />
-              {saving ? "Saving..." : "Save changes"}
+              {saving ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Save className="size-4" />
+              )}
+
+              {saving
+                ? "Saving..."
+                : "Save changes"}
             </button>
           </div>
         </form>
-      ) : (
-        <div className="grid gap-4 lg:grid-cols-3">
-          <InfoCard title="Contact">
+      ) : null}
+
+      <div className="grid gap-4 lg:grid-cols-4">
+        <StatCard
+          label="AI Score"
+          value={
+            lead.lead_score !=
+            null
+              ? `${lead.lead_score}/100`
+              : "—"
+          }
+          icon={
+            <Target className="size-4" />
+          }
+        />
+
+        <StatCard
+          label="Matched Properties"
+          value={
+            matchCount
+          }
+          icon={
+            <MapPin className="size-4" />
+          }
+        />
+
+        <StatCard
+          label="Pending Follow-ups"
+          value={
+            pendingFollowUps.length
+          }
+          icon={
+            <Clock3 className="size-4" />
+          }
+        />
+
+        <StatCard
+          label="Upcoming Appointments"
+          value={
+            upcomingAppointments.length
+          }
+          icon={
+            <CalendarDays className="size-4" />
+          }
+        />
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <section className="rounded-xl border border-border bg-surface">
+          <div className="flex items-center justify-between border-b border-border px-5 py-4">
+            <div className="flex items-center gap-2">
+              <Sparkles className="size-4 text-ink-600" />
+
+              <h2 className="text-sm font-semibold text-ink-900">
+                AI Lead Intelligence
+              </h2>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  void handleAIAnalysis(
+                    "lead_scoring",
+                  )
+                }
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium text-ink-700"
+              >
+                <Target className="size-3.5" />
+                Score
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  void handleAIAnalysis(
+                    "lead_summary",
+                  )
+                }
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium text-ink-700"
+              >
+                <Sparkles className="size-3.5" />
+                Summary
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  void handleAIAnalysis(
+                    "next_action",
+                  )
+                }
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium text-ink-700"
+              >
+                <Lightbulb className="size-3.5" />
+                Next action
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-5 p-5">
+            <div className="grid gap-4 sm:grid-cols-[160px_1fr]">
+              <div className="rounded-xl bg-surface-sunken p-5 text-center">
+                <p className="text-xs text-ink-400">
+                  AI Score
+                </p>
+
+                <p className="mt-2 text-4xl font-semibold text-ink-900">
+                  {lead.lead_score ??
+                    latestScore?.score ??
+                    "—"}
+                </p>
+
+                <p className="text-xs text-ink-400">
+                  out of 100
+                </p>
+
+                <span
+                  className={`mt-3 inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${getPriorityClasses(
+                    lead.priority,
+                  )}`}
+                >
+                  {formatLabel(
+                    lead.priority,
+                  )}
+                </span>
+              </div>
+
+              <div className="space-y-4">
+                <div className="rounded-xl border border-border p-4">
+                  <p className="text-xs font-medium text-ink-400">
+                    AI Summary
+                  </p>
+
+                  <p className="mt-2 text-sm leading-6 text-ink-700">
+                    {latestSummary?.summary ??
+                      "No AI summary generated yet."}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-surface-sunken p-4">
+                  <p className="text-xs font-medium text-ink-400">
+                    Next Action
+                  </p>
+
+                  <p className="mt-2 text-sm leading-6 text-ink-800">
+                    {latestNextAction?.recommendation ??
+                      latestScore?.recommendation ??
+                      "Generate AI Next Action."}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-xl border border-border bg-surface">
+          <div className="border-b border-border px-5 py-4">
+            <h2 className="text-sm font-semibold text-ink-900">
+              Contact & Qualification
+            </h2>
+          </div>
+
+          <div className="grid gap-x-6 gap-y-4 p-5 sm:grid-cols-2">
             <InfoRow
               label="Email"
-              value={lead.email || "—"}
+              value={
+                lead.email ||
+                "—"
+              }
             />
+
             <InfoRow
               label="Phone"
-              value={lead.phone || "—"}
+              value={
+                lead.phone ||
+                "—"
+              }
             />
-            <InfoRow
-              label="Preferred location"
-              value={lead.preferred_location || "—"}
-            />
-          </InfoCard>
 
-          <InfoCard title="Qualification">
             <InfoRow
               label="Source"
-              value={formatLabel(lead.source)}
-            />
-            <InfoRow
-              label="Budget"
-              value={formatBudget(
-                lead.budget_min,
-                lead.budget_max,
+              value={formatLabel(
+                lead.source,
               )}
             />
+
+            <InfoRow
+              label="Preferred location"
+              value={
+                lead.preferred_location ||
+                "—"
+              }
+            />
+
             <InfoRow
               label="Property type"
-              value={lead.property_type || "—"}
+              value={
+                lead.property_type ||
+                "—"
+              }
             />
+
             <InfoRow
               label="Bedrooms"
               value={
-                lead.bedrooms != null
-                  ? String(lead.bedrooms)
+                lead.bedrooms !=
+                null
+                  ? String(
+                      lead.bedrooms,
+                    )
                   : "—"
               }
             />
+
+            <InfoRow
+              label="Budget"
+              value={
+                lead.budget_min !=
+                    null ||
+                lead.budget_max !=
+                    null
+                  ? `${lead.budget_min != null ? Number(lead.budget_min).toLocaleString() : "—"} – ${lead.budget_max != null ? Number(lead.budget_max).toLocaleString() : "—"}`
+                  : "—"
+              }
+            />
+
             <InfoRow
               label="Purchase timeline"
-              value={lead.purchase_timeline || "—"}
-            />
-          </InfoCard>
-
-          <InfoCard title="Pipeline">
-            <InfoRow
-              label="Status"
-              value={formatLabel(lead.status)}
-            />
-            <InfoRow
-              label="Priority"
-              value={formatLabel(lead.priority)}
-            />
-            <InfoRow
-              label="Lead score"
               value={
-                lead.lead_score != null
-                  ? String(lead.lead_score)
-                  : "—"
+                lead.purchase_timeline ||
+                "—"
               }
             />
+
             <InfoRow
               label="Assigned agent"
               value={
                 agents.find(
-                  (agent) => agent.id === lead.assigned_agent_id,
-                )?.full_name || "Unassigned"
+                  (
+                    agent,
+                  ) =>
+                    agent.id ===
+                    lead.assigned_agent_id,
+                )?.full_name ??
+                "Unassigned"
               }
             />
-          </InfoCard>
 
-          <div className="lg:col-span-3">
-            <InfoCard title="Notes">
-              <p className="whitespace-pre-wrap text-sm leading-6 text-ink-600">
-                {lead.notes || "No notes added yet."}
-              </p>
-            </InfoCard>
-          </div>
-
-          <div className="lg:col-span-3">
-            <InfoCard
-              title="Activity timeline"
-              action={
-                <button
-                  type="button"
-                  onClick={() => setActivityModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 text-xs font-medium text-ink-700 hover:text-ink-900"
-                >
-                  <Plus className="size-3.5" />
-                  Add
-                </button>
-              }
-            >
-              {activities.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-border p-6 text-center">
-                  <p className="text-sm font-medium text-ink-800">
-                    No activities yet
-                  </p>
-
-                  <p className="mt-1 text-xs text-ink-400">
-                    Record calls, emails, WhatsApp conversations, notes,
-                    and site visits here.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {activities.map((activity) => (
-                    <div
-                      key={activity.id}
-                      className="flex gap-3 rounded-lg border border-border p-4"
-                    >
-                      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-surface-sunken text-ink-600">
-                        {getActivityIcon(activity.type)}
-                      </div>
-
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                          <div>
-                            <span className="text-sm font-medium text-ink-900">
-                              {formatLabel(activity.type)}
-                            </span>
-
-                            <span className="ml-2 text-xs text-ink-400">
-                              by {activity.actor_name || "Team member"}
-                            </span>
-                          </div>
-
-                          <span className="text-xs text-ink-400">
-                            {formatDate(activity.created_at)}
-                          </span>
-                        </div>
-
-                        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-ink-600">
-                          {activity.description ||
-                            "No description provided."}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+            <InfoRow
+              label="Next follow-up"
+              value={formatDate(
+                lead.next_follow_up_at,
               )}
-            </InfoCard>
+            />
+          </div>
+        </section>
+      </div>
+
+      <section className="rounded-xl border border-border bg-surface">
+        <div className="flex flex-col gap-3 border-b border-border px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <Send className="size-4 text-ink-600" />
+
+              <h2 className="text-sm font-semibold text-ink-900">
+                AI Message Generator
+              </h2>
+            </div>
+
+            <p className="mt-1 text-xs text-ink-400">
+              Generate a personalized message from this lead&apos;s CRM
+              context.
+            </p>
           </div>
 
-          <div className="lg:col-span-3">
-            <InfoCard title="Timeline">
-              <InfoRow
-                label="Created"
-                value={formatDate(lead.created_at)}
-              />
-              <InfoRow
-                label="Last updated"
-                value={formatDate(lead.updated_at)}
-              />
-              <InfoRow
-                label="Last contacted"
-                value={formatDate(lead.last_contacted_at)}
-              />
-              <InfoRow
-                label="Next follow-up"
-                value={formatDate(lead.next_follow_up_at)}
-              />
-            </InfoCard>
+          <div className="flex flex-wrap gap-2">
+            <ChannelButton
+              active={
+                messageChannel ===
+                "whatsapp"
+              }
+              onClick={() =>
+                setMessageChannel(
+                  "whatsapp",
+                )
+              }
+              icon={
+                <MessageCircle className="size-4" />
+              }
+              label="WhatsApp"
+            />
+
+            <ChannelButton
+              active={
+                messageChannel ===
+                "email"
+              }
+              onClick={() =>
+                setMessageChannel(
+                  "email",
+                )
+              }
+              icon={
+                <Mail className="size-4" />
+              }
+              label="Email"
+            />
+
+            <ChannelButton
+              active={
+                messageChannel ===
+                "sms"
+              }
+              onClick={() =>
+                setMessageChannel(
+                  "sms",
+                )
+              }
+              icon={
+                <MessageCircle className="size-4" />
+              }
+              label="SMS"
+            />
           </div>
         </div>
-      )}
+
+        <div className="p-5">
+          <div className="rounded-xl border border-border bg-background">
+            <div className="flex flex-col gap-3 border-b border-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-medium text-ink-400">
+                  Selected channel
+                </p>
+
+                <p className="mt-1 text-sm font-semibold text-ink-900">
+                  {formatLabel(
+                    messageChannel,
+                  )}
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    void handleGenerateMessage()
+                  }
+                  disabled={
+                    generatingMessage
+                  }
+                  className="inline-flex h-9 items-center gap-2 rounded-lg bg-ink-900 px-4 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {generatingMessage ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="size-4" />
+                  )}
+
+                  {generatingMessage
+                    ? "Generating..."
+                    : "Generate message"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    void handleCopyMessage()
+                  }
+                  disabled={
+                    !generatedMessage
+                  }
+                  className="inline-flex h-9 items-center gap-2 rounded-lg border border-border px-4 text-sm font-medium text-ink-700 disabled:opacity-50"
+                >
+                  <Copy className="size-4" />
+
+                  {copiedMessage
+                    ? "Copied"
+                    : "Copy"}
+                </button>
+              </div>
+            </div>
+
+            <div className="min-h-36 whitespace-pre-wrap p-5 text-sm leading-7 text-ink-800">
+              {generatedMessage ||
+                "Your personalized AI message will appear here."}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-border bg-surface">
+        <div className="flex flex-col gap-3 border-b border-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <MapPin className="size-4 text-ink-600" />
+
+              <h2 className="text-sm font-semibold text-ink-900">
+                Matched Properties
+              </h2>
+            </div>
+
+            <p className="mt-1 text-xs text-ink-400">
+              Properties ranked against this lead&apos;s requirements.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() =>
+              void handleRefreshMatches()
+            }
+            disabled={
+              refreshingMatches
+            }
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border px-4 text-sm font-medium text-ink-700 disabled:opacity-50"
+          >
+            {refreshingMatches ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <RefreshCw className="size-4" />
+            )}
+
+            {refreshingMatches
+              ? "Refreshing..."
+              : "Refresh matches"}
+          </button>
+        </div>
+
+        {loadingMatched ? (
+          <div className="p-8 text-center text-sm text-ink-400">
+            Refreshing property matches...
+          </div>
+        ) : matches.length ===
+          0 ? (
+          <div className="p-10 text-center">
+            <MapPin className="mx-auto size-8 text-ink-300" />
+
+            <p className="mt-3 text-sm font-medium text-ink-900">
+              No matched properties yet
+            </p>
+
+            <p className="mt-1 text-xs text-ink-400">
+              Click Refresh matches to calculate available properties.
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-4 p-5 md:grid-cols-2 xl:grid-cols-3">
+            {matches.map(
+              (match) => (
+                <div
+                  key={
+                    match.id
+                  }
+                  className="overflow-hidden rounded-xl border border-border bg-background"
+                >
+                  {match.property
+                    .image_url ? (
+                    <div className="aspect-[16/9] overflow-hidden bg-surface-sunken">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={
+                          match
+                            .property
+                            .image_url
+                        }
+                        alt={
+                          match
+                            .property
+                            .title
+                        }
+                        className="h-full w-full object-cover"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex aspect-[16/9] items-center justify-center bg-surface-sunken text-sm text-ink-400">
+                      No image
+                    </div>
+                  )}
+
+                  <div className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="truncate text-sm font-semibold text-ink-900">
+                          {
+                            match
+                              .property
+                              .title
+                          }
+                        </h3>
+
+                        <p className="mt-1 truncate text-xs text-ink-400">
+                          {
+                            match
+                              .property
+                              .location
+                          }
+                        </p>
+                      </div>
+
+                      <span
+                        className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-semibold ${getMatchScoreClasses(
+                          match.match_score,
+                        )}`}
+                      >
+                        {match.match_score ??
+                          "—"}
+                        %
+                      </span>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
+                      <InfoRow
+                        label="Price"
+                        value={formatMoney(
+                          match
+                            .property
+                            .price,
+                          match
+                            .property
+                            .currency,
+                        )}
+                      />
+
+                      <InfoRow
+                        label="Bedrooms"
+                        value={
+                          match
+                            .property
+                            .bedrooms !=
+                          null
+                            ? String(
+                                match
+                                  .property
+                                  .bedrooms,
+                              )
+                            : "—"
+                        }
+                      />
+
+                      <InfoRow
+                        label="Type"
+                        value={
+                          match
+                            .property
+                            .property_type
+                        }
+                      />
+
+                      <InfoRow
+                        label="Status"
+                        value={formatLabel(
+                          match
+                            .property
+                            .status,
+                        )}
+                      />
+                    </div>
+
+                    {match.match_reason ? (
+                      <div className="mt-4 rounded-lg bg-surface-sunken p-3">
+                        <p className="text-xs leading-5 text-ink-600">
+                          {
+                            match.match_reason
+                          }
+                        </p>
+                      </div>
+                    ) : null}
+
+                    <div className="mt-4 flex gap-2">
+                      <Link
+                        href={`/properties/${match.property.id}`}
+                        className="inline-flex h-8 flex-1 items-center justify-center rounded-lg border border-border text-xs font-medium text-ink-700"
+                      >
+                        View property
+                      </Link>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void handleUnmatch(
+                            match.id,
+                          )
+                        }
+                        className="inline-flex h-8 items-center justify-center rounded-lg border border-red-200 bg-red-50 px-3 text-xs font-medium text-red-700"
+                      >
+                        Unmatch
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ),
+            )}
+          </div>
+        )}
+      </section>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <section className="rounded-xl border border-border bg-surface">
+          <div className="flex items-center justify-between border-b border-border px-5 py-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <Clock3 className="size-4 text-ink-600" />
+
+                <h2 className="text-sm font-semibold text-ink-900">
+                  Follow-ups
+                </h2>
+              </div>
+
+              <p className="mt-1 text-xs text-ink-400">
+                Next actions scheduled for this lead.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                setFollowUpModalOpen(
+                  true,
+                )
+              }
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-ink-900 px-3 text-xs font-medium text-white"
+            >
+              <Plus className="size-3.5" />
+              Add
+            </button>
+          </div>
+
+          {followUps.length ===
+          0 ? (
+            <div className="p-8 text-center text-sm text-ink-400">
+              No follow-ups yet.
+            </div>
+          ) : (
+            <div className="divide-y divide-border">
+              {followUps
+                .slice(
+                  0,
+                  6,
+                )
+                .map(
+                  (
+                    followUp,
+                  ) => (
+                    <div
+                      key={
+                        followUp.id
+                      }
+                      className="flex items-start justify-between gap-3 px-5 py-4"
+                    >
+                      <div>
+                        <p className="text-sm font-medium text-ink-900">
+                          {formatLabel(
+                            followUp.type,
+                          )}
+                        </p>
+
+                        <p className="mt-1 text-xs text-ink-400">
+                          {formatDate(
+                            followUp.due_at,
+                          )}
+                        </p>
+
+                        {followUp.notes ? (
+                          <p className="mt-2 text-sm text-ink-600">
+                            {
+                              followUp.notes
+                            }
+                          </p>
+                        ) : null}
+                      </div>
+
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className="rounded-full border border-border px-2.5 py-1 text-xs text-ink-600">
+                          {formatLabel(
+                            followUp.status,
+                          )}
+                        </span>
+
+                        {followUp.status ===
+                        "pending" ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void handleCompleteFollowUp(
+                                followUp.id,
+                              )
+                            }
+                            className="flex size-8 items-center justify-center rounded-lg border border-green-200 bg-green-50 text-green-700"
+                          >
+                            <Check className="size-4" />
+                          </button>
+                        ) : null}
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handleDeleteFollowUp(
+                              followUp.id,
+                            )
+                          }
+                          className="flex size-8 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-600"
+                        >
+                          <Trash2 className="size-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ),
+                )}
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-xl border border-border bg-surface">
+          <div className="flex items-center justify-between border-b border-border px-5 py-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <CalendarDays className="size-4 text-ink-600" />
+
+                <h2 className="text-sm font-semibold text-ink-900">
+                  Appointments
+                </h2>
+              </div>
+
+              <p className="mt-1 text-xs text-ink-400">
+                Scheduled meetings and property viewings.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                setAppointmentModalOpen(
+                  true,
+                )
+              }
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-ink-900 px-3 text-xs font-medium text-white"
+            >
+              <Plus className="size-3.5" />
+              Add
+            </button>
+          </div>
+
+          {appointments.length ===
+          0 ? (
+            <div className="p-8 text-center text-sm text-ink-400">
+              No appointments yet.
+            </div>
+          ) : (
+            <div className="divide-y divide-border">
+              {appointments
+                .slice(
+                  0,
+                  6,
+                )
+                .map(
+                  (
+                    appointment,
+                  ) => (
+                    <div
+                      key={
+                        appointment.id
+                      }
+                      className="flex items-start justify-between gap-3 px-5 py-4"
+                    >
+                      <div>
+                        <p className="text-sm font-medium text-ink-900">
+                          {formatLabel(
+                            appointment.type,
+                          )}
+                        </p>
+
+                        <p className="mt-1 text-xs text-ink-400">
+                          {formatDate(
+                            appointment.scheduled_at,
+                          )}
+                        </p>
+
+                        <p className="mt-1 text-xs text-ink-500">
+                          {matches.find(
+                            (
+                              match,
+                            ) =>
+                              match
+                                .property
+                                .id ===
+                              appointment.property_id,
+                          )?.property
+                            .title ??
+                            "No property"}
+                        </p>
+                      </div>
+
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className="rounded-full border border-border px-2.5 py-1 text-xs text-ink-600">
+                          {formatLabel(
+                            appointment.status,
+                          )}
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handleDeleteAppointment(
+                              appointment.id,
+                            )
+                          }
+                          className="flex size-8 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-600"
+                        >
+                          <Trash2 className="size-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ),
+                )}
+            </div>
+          )}
+        </section>
+      </div>
+
+      <section className="rounded-xl border border-border bg-surface">
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <Activity className="size-4 text-ink-600" />
+
+              <h2 className="text-sm font-semibold text-ink-900">
+                Activity timeline
+              </h2>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() =>
+              setActivityModalOpen(
+                true,
+              )
+            }
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-ink-900 px-3 text-xs font-medium text-white"
+          >
+            <Plus className="size-3.5" />
+            Add activity
+          </button>
+        </div>
+
+        {activities.length ===
+        0 ? (
+          <div className="p-8 text-center text-sm text-ink-400">
+            No activities yet.
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {activities.map(
+              (activity) => (
+                <div
+                  key={
+                    activity.id
+                  }
+                  className="flex gap-3 px-5 py-4"
+                >
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-sunken text-ink-600">
+                    {getActivityIcon(
+                      activity.type,
+                    )}
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:justify-between">
+                      <p className="text-sm font-medium text-ink-900">
+                        {formatLabel(
+                          activity.type,
+                        )}
+                      </p>
+
+                      <span className="text-xs text-ink-400">
+                        {formatDate(
+                          activity.created_at,
+                        )}
+                      </span>
+                    </div>
+
+                    <p className="mt-1 text-sm leading-6 text-ink-600">
+                      {activity.description ||
+                        "No description."}
+                    </p>
+                  </div>
+                </div>
+              ),
+            )}
+          </div>
+        )}
+      </section>
 
       {activityModalOpen ? (
         <Modal
           title="Add activity"
-          description="Record an interaction or note for this lead."
-          onClose={() => {
-            if (!addingActivity) {
-              setActivityModalOpen(false);
-              setError("");
-            }
-          }}
+          description="Record an interaction with this lead."
+          onClose={() =>
+            setActivityModalOpen(
+              false,
+            )
+          }
         >
           <form
-            onSubmit={handleAddActivity}
+            onSubmit={
+              handleAddActivity
+            }
             className="space-y-5"
           >
             <SelectField
               label="Activity type"
-              value={activityType}
-              onChange={setActivityType}
-              options={ACTIVITY_OPTIONS}
+              value={
+                activityType
+              }
+              onChange={(
+                value,
+              ) =>
+                setActivityType(
+                  value as ActivityType,
+                )
+              }
+              options={
+                ACTIVITY_OPTIONS
+              }
             />
 
             <div className="space-y-2">
-              <label
-                htmlFor="activity-description"
-                className="text-sm font-medium text-ink-800"
-              >
+              <label className="text-sm font-medium text-ink-800">
                 Description
               </label>
 
               <textarea
-                id="activity-description"
-                value={activityDescription}
-                onChange={(event) =>
-                  setActivityDescription(event.target.value)
+                value={
+                  activityDescription
+                }
+                onChange={(
+                  event,
+                ) =>
+                  setActivityDescription(
+                    event.target.value,
+                  )
                 }
                 rows={5}
-                placeholder="Describe what happened..."
                 required
-                className="w-full resize-y rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:ring-2"
+                className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm"
               />
             </div>
 
-            {error ? (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">
-                {error}
-              </div>
-            ) : null}
+            <ModalActions
+              saving={
+                saving
+              }
+              submitLabel="Add activity"
+              onCancel={() =>
+                setActivityModalOpen(
+                  false,
+                )
+              }
+            />
+          </form>
+        </Modal>
+      ) : null}
 
-            <div className="flex justify-end gap-2 border-t border-border pt-4">
-              <button
-                type="button"
-                onClick={() => setActivityModalOpen(false)}
-                disabled={addingActivity}
-                className="h-9 rounded-lg border border-border px-4 text-sm font-medium text-ink-700 hover:bg-surface-sunken disabled:opacity-50"
-              >
-                Cancel
-              </button>
+      {followUpModalOpen ? (
+        <Modal
+          title="Schedule follow-up"
+          description="Create the next action for this lead."
+          onClose={() =>
+            setFollowUpModalOpen(
+              false,
+            )
+          }
+        >
+          <form
+            onSubmit={
+              handleAddFollowUp
+            }
+            className="space-y-5"
+          >
+            <SelectField
+              label="Assigned to"
+              value={
+                followUpAssignedTo
+              }
+              onChange={
+                setFollowUpAssignedTo
+              }
+              options={[
+                "",
+                ...agents.map(
+                  (
+                    agent,
+                  ) =>
+                    agent.id,
+                ),
+              ]}
+              optionLabels={{
+                "": "Unassigned",
+                ...Object.fromEntries(
+                  agents.map(
+                    (
+                      agent,
+                    ) => [
+                      agent.id,
+                      agent.full_name,
+                    ],
+                  ),
+                ),
+              }}
+            />
 
-              <button
-                type="submit"
-                disabled={addingActivity}
-                className="h-9 rounded-lg bg-ink-900 px-4 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {addingActivity ? "Saving..." : "Add activity"}
-              </button>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-ink-800">
+                Due date & time
+              </label>
+
+              <input
+                type="datetime-local"
+                value={
+                  followUpDueAt
+                }
+                onChange={(
+                  event,
+                ) =>
+                  setFollowUpDueAt(
+                    event.target.value,
+                  )
+                }
+                required
+                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm"
+              />
             </div>
+
+            <Field
+              label="Type"
+              value={
+                followUpType
+              }
+              onChange={
+                setFollowUpType
+              }
+            />
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-ink-800">
+                Notes
+              </label>
+
+              <textarea
+                value={
+                  followUpNotes
+                }
+                onChange={(
+                  event,
+                ) =>
+                  setFollowUpNotes(
+                    event.target.value,
+                  )
+                }
+                rows={4}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm"
+              />
+            </div>
+
+            <ModalActions
+              saving={
+                saving
+              }
+              submitLabel="Schedule follow-up"
+              onCancel={() =>
+                setFollowUpModalOpen(
+                  false,
+                )
+              }
+            />
+          </form>
+        </Modal>
+      ) : null}
+
+      {appointmentModalOpen ? (
+        <Modal
+          title="Schedule appointment"
+          description="Create a meeting or property viewing."
+          onClose={() =>
+            setAppointmentModalOpen(
+              false,
+            )
+          }
+        >
+          <form
+            onSubmit={
+              handleAddAppointment
+            }
+            className="space-y-5"
+          >
+            <SelectField
+              label="Property"
+              value={
+                appointmentPropertyId
+              }
+              onChange={
+                setAppointmentPropertyId
+              }
+              options={[
+                "",
+                ...matches.map(
+                  (
+                    match,
+                  ) =>
+                    match
+                      .property
+                      .id,
+                ),
+              ]}
+              optionLabels={{
+                "": "No property",
+                ...Object.fromEntries(
+                  matches.map(
+                    (
+                      match,
+                    ) => [
+                      match
+                        .property
+                        .id,
+                      match
+                        .property
+                        .title,
+                    ],
+                  ),
+                ),
+              }}
+            />
+
+            <SelectField
+              label="Agent"
+              value={
+                appointmentAgentId
+              }
+              onChange={
+                setAppointmentAgentId
+              }
+              options={[
+                "",
+                ...agents.map(
+                  (
+                    agent,
+                  ) =>
+                    agent.id,
+                ),
+              ]}
+              optionLabels={{
+                "": "Use lead assignment",
+                ...Object.fromEntries(
+                  agents.map(
+                    (
+                      agent,
+                    ) => [
+                      agent.id,
+                      agent.full_name,
+                    ],
+                  ),
+                ),
+              }}
+            />
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-ink-800">
+                Date & time
+              </label>
+
+              <input
+                type="datetime-local"
+                value={
+                  appointmentScheduledAt
+                }
+                onChange={(
+                  event,
+                ) =>
+                  setAppointmentScheduledAt(
+                    event.target.value,
+                  )
+                }
+                required
+                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm"
+              />
+            </div>
+
+            <SelectField
+              label="Appointment type"
+              value={
+                appointmentType
+              }
+              onChange={(
+                value,
+              ) =>
+                setAppointmentType(
+                  value as AppointmentType,
+                )
+              }
+              options={
+                APPOINTMENT_TYPES
+              }
+            />
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-ink-800">
+                Notes
+              </label>
+
+              <textarea
+                value={
+                  appointmentNotes
+                }
+                onChange={(
+                  event,
+                ) =>
+                  setAppointmentNotes(
+                    event.target.value,
+                  )
+                }
+                rows={4}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm"
+              />
+            </div>
+
+            <ModalActions
+              saving={
+                saving
+              }
+              submitLabel="Schedule appointment"
+              onCancel={() =>
+                setAppointmentModalOpen(
+                  false,
+                )
+              }
+            />
           </form>
         </Modal>
       ) : null}
@@ -1108,38 +4046,45 @@ export default function LeadDetailPage() {
       {deleteModalOpen ? (
         <Modal
           title="Delete lead"
-          description={`Are you sure you want to delete ${lead.full_name}? This action cannot be undone.`}
-          onClose={() => {
-            if (!deleting) {
-              setDeleteModalOpen(false);
-              setError("");
-            }
-          }}
+          description={`Are you sure you want to permanently delete ${lead.full_name}?`}
+          onClose={() =>
+            setDeleteModalOpen(
+              false,
+            )
+          }
         >
-          {error ? (
-            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">
-              {error}
-            </div>
-          ) : null}
-
-          <div className="flex justify-end gap-2 border-t border-border pt-4">
+          <div className="flex justify-end gap-2">
             <button
               type="button"
-              onClick={() => setDeleteModalOpen(false)}
-              disabled={deleting}
-              className="h-9 rounded-lg border border-border px-4 text-sm font-medium text-ink-700 hover:bg-surface-sunken disabled:opacity-50"
+              onClick={() =>
+                setDeleteModalOpen(
+                  false,
+                )
+              }
+              className="h-9 rounded-lg border border-border px-4 text-sm font-medium text-ink-700"
             >
               Cancel
             </button>
 
             <button
               type="button"
-              onClick={handleDelete}
-              disabled={deleting}
-              className="inline-flex h-9 items-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() =>
+                void handleDeleteLead()
+              }
+              disabled={
+                deleting
+              }
+              className="inline-flex h-9 items-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-medium text-white disabled:opacity-50"
             >
-              <Trash2 className="size-4" />
-              {deleting ? "Deleting..." : "Delete lead"}
+              {deleting ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Trash2 className="size-4" />
+              )}
+
+              {deleting
+                ? "Deleting..."
+                : "Delete lead"}
             </button>
           </div>
         </Modal>
@@ -1153,12 +4098,16 @@ function Field({
   value,
   onChange,
   type = "text",
+  placeholder,
   required = false,
 }: {
   label: string;
   value: string;
-  onChange: (value: string) => void;
+  onChange: (
+    value: string,
+  ) => void;
   type?: string;
+  placeholder?: string;
   required?: boolean;
 }) {
   return (
@@ -1170,8 +4119,17 @@ function Field({
       <input
         type={type}
         value={value}
-        onChange={(event) => onChange(event.target.value)}
-        required={required}
+        onChange={(event) =>
+          onChange(
+            event.target.value,
+          )
+        }
+        placeholder={
+          placeholder
+        }
+        required={
+          required
+        }
         className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-2"
       />
     </div>
@@ -1187,9 +4145,14 @@ function SelectField({
 }: {
   label: string;
   value: string;
-  onChange: (value: string) => void;
+  onChange: (
+    value: string,
+  ) => void;
   options: readonly string[];
-  optionLabels?: Record<string, string>;
+  optionLabels?: Record<
+    string,
+    string
+  >;
 }) {
   return (
     <div className="space-y-2">
@@ -1200,43 +4163,39 @@ function SelectField({
       <div className="relative">
         <select
           value={value}
-          onChange={(event) => onChange(event.target.value)}
-          className="h-10 w-full appearance-none rounded-lg border border-border bg-background px-3 pr-9 text-sm outline-none"
+          onChange={(event) =>
+            onChange(
+              event.target.value,
+            )
+          }
+          className="h-10 w-full appearance-none rounded-lg border border-border bg-background px-3 pr-9 text-sm outline-none focus:ring-2"
         >
-          {options.map((option) => (
-            <option key={option} value={option}>
-              {optionLabels?.[option] ?? formatLabel(option)}
-            </option>
-          ))}
+          {options.map(
+            (
+              option,
+            ) => (
+              <option
+                key={
+                  option
+                }
+                value={
+                  option
+                }
+              >
+                {optionLabels?.[
+                  option
+                ] ??
+                  formatLabel(
+                    option,
+                  )}
+              </option>
+            ),
+          )}
         </select>
 
         <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-ink-400" />
       </div>
     </div>
-  );
-}
-
-function InfoCard({
-  title,
-  children,
-  action,
-}: {
-  title: string;
-  children: React.ReactNode;
-  action?: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-xl border border-border bg-surface p-5">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-ink-900">
-          {title}
-        </h2>
-
-        {action}
-      </div>
-
-      <div className="space-y-3">{children}</div>
-    </section>
   );
 }
 
@@ -1248,13 +4207,72 @@ function InfoRow({
   value: string;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-border pb-3 last:border-b-0 last:pb-0">
-      <span className="text-sm text-ink-400">{label}</span>
+    <div className="flex items-start justify-between gap-4 border-b border-border pb-3">
+      <span className="text-xs text-ink-400">
+        {label}
+      </span>
 
-      <span className="max-w-[65%] text-right text-sm font-medium text-ink-800">
+      <span className="max-w-[70%] text-right text-sm font-medium text-ink-800">
         {value}
       </span>
     </div>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: number | string;
+  icon: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-surface p-5">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs font-medium text-ink-400">
+          {label}
+        </span>
+
+        <div className="flex size-8 items-center justify-center rounded-lg bg-surface-sunken text-ink-600">
+          {icon}
+        </div>
+      </div>
+
+      <p className="mt-3 text-2xl font-semibold tracking-tight text-ink-900">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function ChannelButton({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={
+        onClick
+      }
+      className={
+        active
+          ? "inline-flex h-9 items-center gap-2 rounded-lg bg-ink-900 px-3 text-xs font-medium text-white"
+          : "inline-flex h-9 items-center gap-2 rounded-lg border border-border px-3 text-xs font-medium text-ink-700"
+      }
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
 
@@ -1271,30 +4289,79 @@ function Modal({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6">
-      <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-surface shadow-xl">
+      <div className="w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-surface shadow-xl">
         <div className="flex items-start justify-between border-b border-border px-5 py-4">
-          <div className="pr-4">
+          <div>
             <h2 className="text-base font-semibold text-ink-900">
               {title}
             </h2>
 
-            <p className="mt-1 text-xs leading-5 text-ink-400">
+            <p className="mt-1 text-xs text-ink-400">
               {description}
             </p>
           </div>
 
           <button
             type="button"
-            onClick={onClose}
-            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-500 hover:bg-surface-sunken"
+            onClick={
+              onClose
+            }
+            className="flex size-8 items-center justify-center rounded-lg text-ink-500"
             aria-label="Close"
           >
             <X className="size-4" />
           </button>
         </div>
 
-        <div className="p-5">{children}</div>
+        <div className="max-h-[80vh] overflow-y-auto p-5">
+          {children}
+        </div>
       </div>
+    </div>
+  );
+}
+
+function ModalActions({
+  saving,
+  submitLabel,
+  onCancel,
+}: {
+  saving: boolean;
+  submitLabel: string;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="flex justify-end gap-2 border-t border-border pt-4">
+      <button
+        type="button"
+        onClick={
+          onCancel
+        }
+        disabled={
+          saving
+        }
+        className="h-9 rounded-lg border border-border px-4 text-sm font-medium text-ink-700"
+      >
+        Cancel
+      </button>
+
+      <button
+        type="submit"
+        disabled={
+          saving
+        }
+        className="inline-flex h-9 items-center gap-2 rounded-lg bg-ink-900 px-4 text-sm font-medium text-white disabled:opacity-50"
+      >
+        {saving ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : (
+          <Save className="size-4" />
+        )}
+
+        {saving
+          ? "Saving..."
+          : submitLabel}
+      </button>
     </div>
   );
 }
