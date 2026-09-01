@@ -129,9 +129,13 @@ export async function POST(
       inviterProfileError ||
       !inviterProfile
     ) {
+      console.error(
+        "[Team Invite] Unable to resolve inviter profile:",
+        inviterProfileError,
+      );
+
       return jsonError(
-        inviterProfileError?.message ??
-          "Unable to resolve your organization profile.",
+        "Unable to verify your team permissions.",
         403,
       );
     }
@@ -161,10 +165,13 @@ export async function POST(
       supabaseAdmin =
         createAdminClient();
     } catch (error) {
+      console.error(
+        "[Team Invite] Admin client configuration error:",
+        error,
+      );
+
       return jsonError(
-        error instanceof Error
-          ? error.message
-          : "Server configuration error.",
+        "Invitation service is temporarily unavailable.",
         500,
       );
     }
@@ -199,8 +206,13 @@ export async function POST(
         .toLowerCase()
         .includes("column")
     ) {
+      console.error(
+        "[Team Invite] Existing profile lookup failed:",
+        existingProfileError,
+      );
+
       return jsonError(
-        existingProfileError.message,
+        "Unable to verify whether this email is already in use.",
         500,
       );
     }
@@ -257,8 +269,13 @@ export async function POST(
     if (
       cancelError
     ) {
+      console.error(
+        "[Team Invite] Unable to cancel previous pending invitation:",
+        cancelError,
+      );
+
       return jsonError(
-        `Unable to prepare invitation: ${cancelError.message}`,
+        "Unable to prepare the invitation.",
         500,
       );
     }
@@ -295,8 +312,13 @@ export async function POST(
     if (
       invitationError
     ) {
+      console.error(
+        "[Team Invite] Invitation insert failed:",
+        invitationError,
+      );
+
       return jsonError(
-        `Unable to create invitation: ${invitationError.message}`,
+        "Unable to create the invitation.",
         500,
       );
     }
@@ -335,6 +357,11 @@ export async function POST(
     if (
       authInviteError
     ) {
+      console.error(
+        "[Team Invite] Supabase invitation email failed:",
+        authInviteError,
+      );
+
       await supabaseAdmin
         .from(
           "team_invitations",
@@ -351,8 +378,8 @@ export async function POST(
         );
 
       return jsonError(
-        `Unable to send invitation email: ${authInviteError.message}`,
-        400,
+        "Unable to send the invitation email right now.",
+        502,
       );
     }
 
@@ -374,9 +401,7 @@ export async function POST(
     );
 
     return jsonError(
-      error instanceof Error
-        ? error.message
-        : "Unexpected server error while sending invitation.",
+      "Unexpected server error while sending the invitation.",
       500,
     );
   }

@@ -27,15 +27,15 @@ type LeadRow = {
   full_name: string;
   email: string | null;
   phone: string | null;
-  source: string;
+  source: string | null;
   budget_min: number | null;
   budget_max: number | null;
   preferred_location: string | null;
   property_type: string | null;
   bedrooms: number | null;
   purchase_timeline: string | null;
-  status: string;
-  priority: string;
+  status: string | null;
+  priority: string | null;
   lead_score: number | null;
   assigned_agent_id: string | null;
   last_contacted_at: string | null;
@@ -47,20 +47,39 @@ type LeadRow = {
 
 type ActivityRow = {
   id: string;
+  organization_id: string;
+  lead_id: string;
   type: string;
+  subject: string | null;
   description: string | null;
   created_at: string;
 };
 
-type MatchRow = {
+type FollowUpRow = {
+  id: string;
+  organization_id: string;
+  lead_id: string;
+  assigned_to: string | null;
+  due_at: string;
+  type: string;
+  notes: string | null;
+  status: string;
+  completed_at: string | null;
+  created_at: string;
+};
+
+type PropertyMatchRow = {
   id: string;
   property_id: string;
   match_score: number | null;
   match_reason: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 type PropertyRow = {
   id: string;
+  organization_id: string;
   title: string;
   description: string | null;
   property_type: string;
@@ -69,31 +88,25 @@ type PropertyRow = {
   currency: string;
   location: string;
   address: string | null;
-  bedrooms: number | null;
-  bathrooms: number | null;
-  area: number | null;
-  area_unit: string | null;
+  bedrooms: number;
+  bathrooms: number;
+  area: number;
+  area_unit: string;
   image_url: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
-type FollowUpRow = {
-  id: string;
-  due_at: string;
-  type: string;
-  notes: string | null;
-  status: string;
+type RequestBody = {
+  leadId?: string;
+  analysisType?: AnalysisType;
+  channel?: MessageChannel;
 };
 
-type RankedProperty = {
-  property: PropertyRow;
-  match_score: number;
-  match_reason: string;
-};
+function clampScore(value: unknown): number {
+  const parsed = Number(value);
 
-function clampScore(value: unknown) {
-  const numeric = Number(value);
-
-  if (!Number.isFinite(numeric)) {
+  if (!Number.isFinite(parsed)) {
     return 0;
   }
 
@@ -101,667 +114,138 @@ function clampScore(value: unknown) {
     0,
     Math.min(
       100,
-      Math.round(numeric),
+      Math.round(parsed),
     ),
   );
 }
 
 function normalizePriority(
   value: unknown,
-  score: number,
-) {
-  const priority =
-    String(value ?? "").toLowerCase();
+): "cold" | "warm" | "hot" {
+  const normalized =
+    String(value ?? "")
+      .trim()
+      .toLowerCase();
 
   if (
-    priority === "hot" ||
-    priority === "warm" ||
-    priority === "cold"
+    normalized === "hot" ||
+    normalized === "warm" ||
+    normalized === "cold"
   ) {
-    return priority;
+    return normalized;
   }
 
-  if (score >= 75) {
-    return "hot" as const;
-  }
-
-  if (score >= 45) {
-    return "warm" as const;
-  }
-
-  return "cold" as const;
+  return "cold";
 }
 
-function calculatePropertyMatch(
+function safeJsonParse(
+  value: string,
+): AIResponse {
+  try {
+    const parsed = JSON.parse(value);
+
+    if (
+      parsed === null ||
+      typeof parsed !== "object"
+    ) {
+      return {};
+    }
+
+    return parsed as AIResponse;
+  } catch {
+    return {};
+  }
+}
+
+function getErrorMessage(
+  error: unknown,
+): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "Unknown error";
+}
+
+function buildLeadContext(
   lead: LeadRow,
+) {
+  return {
+    id: lead.id,
+    full_name: lead.full_name,
+    email: lead.email,
+    phone: lead.phone,
+    source: lead.source,
+    budget_min: lead.budget_min,
+    budget_max: lead.budget_max,
+    preferred_location:
+      lead.preferred_location,
+    property_type: lead.property_type,
+    bedrooms: lead.bedrooms,
+    purchase_timeline:
+      lead.purchase_timeline,
+    status: lead.status,
+    priority: lead.priority,
+    lead_score: lead.lead_score,
+    assigned_agent_id:
+      lead.assigned_agent_id,
+    last_contacted_at:
+      lead.last_contacted_at,
+    next_follow_up_at:
+      lead.next_follow_up_at,
+    notes: lead.notes,
+    created_at: lead.created_at,
+    updated_at: lead.updated_at,
+  };
+}
+
+function buildPropertyContext(
   property: PropertyRow,
-): RankedProperty {
-  let score = 0;
-
-  const reasons: string[] = [];
-
-  const normalizedLeadLocation =
-    lead.preferred_location
-      ?.trim()
-      .toLowerCase();
-
-  const normalizedPropertyLocation =
-    property.location
-      ?.trim()
-      .toLowerCase();
-
-  const normalizedLeadType =
-    lead.property_type
-      ?.trim()
-      .toLowerCase();
-
-  const normalizedPropertyType =
-    property.property_type
-      ?.trim()
-      .toLowerCase();
-
-  // Budget: 35 points.
-  if (
-    lead.budget_min != null ||
-    lead.budget_max != null
-  ) {
-    const min =
-      lead.budget_min ?? 0;
-
-    const max =
-      lead.budget_max ??
-      Number.POSITIVE_INFINITY;
-
-    if (
-      property.price >= min &&
-      property.price <= max
-    ) {
-      score += 35;
-
-      reasons.push(
-        "Within budget",
-      );
-    } else if (
-      property.price <=
-      max * 1.1
-    ) {
-      score += 18;
-
-      reasons.push(
-        "Slightly above budget",
-      );
-    }
-  }
-
-  // Location: 25 points.
-  if (
-    normalizedLeadLocation &&
-    normalizedPropertyLocation
-  ) {
-    if (
-      normalizedPropertyLocation.includes(
-        normalizedLeadLocation,
-      ) ||
-      normalizedLeadLocation.includes(
-        normalizedPropertyLocation,
-      )
-    ) {
-      score += 25;
-
-      reasons.push(
-        "Location matches",
-      );
-    }
-  }
-
-  // Property type: 15 points.
-  if (
-    normalizedLeadType &&
-    normalizedPropertyType
-  ) {
-    if (
-      normalizedPropertyType.includes(
-        normalizedLeadType,
-      ) ||
-      normalizedLeadType.includes(
-        normalizedPropertyType,
-      )
-    ) {
-      score += 15;
-
-      reasons.push(
-        "Property type matches",
-      );
-    }
-  }
-
-  // Bedrooms: 15 points.
-  if (
-    lead.bedrooms != null
-  ) {
-    if (
-      property.bedrooms != null &&
-      property.bedrooms >=
-        lead.bedrooms
-    ) {
-      score += 15;
-
-      reasons.push(
-        "Bedroom requirement matches",
-      );
-    } else if (
-      property.bedrooms != null &&
-      property.bedrooms ===
-        lead.bedrooms - 1
-    ) {
-      score += 7;
-
-      reasons.push(
-        "Close to bedroom requirement",
-      );
-    }
-  }
-
-  // Availability: 10 points.
-  if (
-    property.status
-      .toLowerCase() ===
-    "available"
-  ) {
-    score += 10;
-
-    reasons.push(
-      "Currently available",
-    );
-  }
-
-  const matchScore =
-    Math.min(
-      100,
-      score,
-    );
-
+) {
   return {
-    property,
-    match_score:
-      matchScore,
-    match_reason:
-      reasons.length > 0
-        ? reasons.join(" • ")
-        : "General match",
+    id: property.id,
+    title: property.title,
+    description:
+      property.description,
+    property_type:
+      property.property_type,
+    status: property.status,
+    price: property.price,
+    currency: property.currency,
+    location: property.location,
+    address: property.address,
+    bedrooms: property.bedrooms,
+    bathrooms: property.bathrooms,
+    area: property.area,
+    area_unit: property.area_unit,
   };
 }
 
-function buildFallbackAnalysis(
-  lead: LeadRow,
-  activities: ActivityRow[],
-  matchedProperties: RankedProperty[],
-  followUps: FollowUpRow[],
+async function callOpenAI(
+  prompt: string,
+  model: string,
   analysisType: AnalysisType,
-) {
-  let score = 35;
-
-  const reasons: string[] =
-    [];
-
-  if (
-    lead.budget_min != null ||
-    lead.budget_max != null
-  ) {
-    score += 15;
-    reasons.push(
-      "Budget information is available.",
-    );
-  }
-
-  if (
-    lead.preferred_location
-  ) {
-    score += 10;
-    reasons.push(
-      "Preferred location is specified.",
-    );
-  }
-
-  if (
-    lead.property_type
-  ) {
-    score += 8;
-    reasons.push(
-      "Property type is specified.",
-    );
-  }
-
-  if (
-    lead.bedrooms != null
-  ) {
-    score += 5;
-    reasons.push(
-      "Bedroom requirement is specified.",
-    );
-  }
-
-  if (
-    lead.purchase_timeline
-  ) {
-    score += 10;
-    reasons.push(
-      "Purchase timeline is available.",
-    );
-  }
-
-  if (
-    matchedProperties.length >
-    0
-  ) {
-    score += Math.min(
-      12,
-      matchedProperties.length *
-        4,
-    );
-
-    reasons.push(
-      `${matchedProperties.length} matching propert${
-        matchedProperties.length ===
-        1
-          ? "y is"
-          : "ies are"
-      } available.`,
-    );
-  }
-
-  if (
-    activities.length >
-    0
-  ) {
-    score += Math.min(
-      8,
-      activities.length *
-        2,
-    );
-
-    reasons.push(
-      "There is recent CRM activity.",
-    );
-  }
-
-  if (
-    followUps.length >
-    0
-  ) {
-    score += 5;
-
-    reasons.push(
-      "A follow-up is already scheduled.",
-    );
-  }
-
-  score = clampScore(score);
-
-  const priority =
-    normalizePriority(
-      lead.priority,
-      score,
-    );
-
-  const summary =
-    `${lead.full_name} is currently in the ${lead.status} stage with a ${priority}-priority profile. ${reasons.join(
-      " ",
-    )}`;
-
-  let recommendation =
-    "Complete qualification and establish a clear next follow-up.";
-
-  if (
-    analysisType ===
-    "next_action"
-  ) {
-    if (
-      followUps.length >
-      0
-    ) {
-      recommendation =
-        "Complete the next scheduled follow-up, confirm any changes in budget or requirements, and update the lead record.";
-    } else if (
-      matchedProperties.length >
-      0
-    ) {
-      const best =
-        matchedProperties[0];
-
-      recommendation =
-        `Contact the lead and present ${best.property.title} first because it has the strongest current property match.`;
-    } else if (
-      activities.length ===
-      0
-    ) {
-      recommendation =
-        "Make the first contact, confirm the lead's requirements, and record the interaction in the activity timeline.";
-    } else if (
-      lead.status ===
-      "negotiation"
-    ) {
-      recommendation =
-        "Contact the lead to clarify objections, confirm commercial terms, and move the opportunity toward a decision.";
-    } else if (
-      lead.status ===
-      "site_visit"
-    ) {
-      recommendation =
-        "Follow up on the site visit, capture feedback, and determine whether the lead should move to negotiation.";
-    } else if (
-      priority ===
-      "hot"
-    ) {
-      recommendation =
-        "Contact the lead promptly and turn the current interest into a scheduled meeting, property viewing, or negotiation.";
-    } else {
-      recommendation =
-        "Contact the lead, validate the remaining qualification details, and schedule the next concrete sales step.";
-    }
-  }
-
-  if (
-    analysisType ===
-    "property_match"
-  ) {
-    if (
-      matchedProperties.length >
-      0
-    ) {
-      const best =
-        matchedProperties[0];
-
-      recommendation =
-        `Top match: ${best.property.title}. Match score: ${best.match_score}/100. ${best.match_reason}. Recommend showing this property first and confirming the lead's feedback.`;
-    } else {
-      recommendation =
-        "No strong property match was found from the currently available inventory. Broaden the property search criteria or update the lead requirements.";
-    }
-  }
-
-  return {
-    score:
-      analysisType ===
-      "property_match"
-        ? matchedProperties[0]
-            ?.match_score ??
-          null
-        : score,
-    priority,
-    summary,
-    recommendation,
-  };
-}
-
-function buildFallbackMessage(
-  lead: LeadRow,
-  matchedProperties: RankedProperty[],
-  channel: MessageChannel,
-) {
-  const name =
-    lead.full_name
-      .split(" ")[0] ||
-    lead.full_name;
-
-  const bestProperty =
-    matchedProperties[0]
-      ?.property;
-
-  const propertyText =
-    bestProperty
-      ? ` I found ${bestProperty.title} in ${bestProperty.location}${
-          bestProperty.price
-            ? ` around ${bestProperty.currency} ${Number(
-                bestProperty.price,
-              ).toLocaleString()}`
-            : ""
-        } that may fit your requirements.`
-      : "";
-
-  if (
-    channel ===
-    "whatsapp"
-  ) {
-    return `Hi ${name}, hope you're doing well. I'm following up on your property search.${propertyText} Let me know a convenient time to discuss the options and I'll be happy to help.`;
-  }
-
-  if (
-    channel ===
-    "sms"
-  ) {
-    return `Hi ${name}, following up on your property search.${propertyText} Reply here and I'll share the best options.`;
-  }
-
-  return `Subject: Property options for your requirements
-
-Hi ${name},
-
-I'm following up regarding your property search.${propertyText}
-
-Please let me know a convenient time to discuss the available options.
-
-Best regards`;
-}
-
-async function callAI(
-  lead: LeadRow,
-  activities: ActivityRow[],
-  matchedProperties: RankedProperty[],
-  followUps: FollowUpRow[],
-  analysisType: AnalysisType,
-  channel?: MessageChannel,
 ) {
   const apiKey =
     process.env.OPENAI_API_KEY;
 
-  const model =
-    process.env.OPENAI_MODEL;
-
-  if (
-    !apiKey ||
-    !model
-  ) {
-    if (
-      analysisType ===
-        "message_generation" &&
-      channel
-    ) {
-      return {
-        score: null,
-        priority:
-          normalizePriority(
-            lead.priority,
-            Number(
-              lead.lead_score ??
-                0,
-            ),
-          ),
-        summary:
-          "Fallback message generated from CRM context.",
-        recommendation:
-          buildFallbackMessage(
-            lead,
-            matchedProperties,
-            channel,
-          ),
-        model:
-          "rule-based-fallback",
-        rawResponse: {
-          mode: "fallback",
-          channel,
-        },
-      };
-    }
-
-    return {
-      ...buildFallbackAnalysis(
-        lead,
-        activities,
-        matchedProperties,
-        followUps,
-        analysisType,
-      ),
-      model:
-        "rule-based-fallback",
-      rawResponse: {
-        mode: "fallback",
-        reason:
-          "OPENAI_API_KEY or OPENAI_MODEL is not configured.",
-      },
-    };
+  if (!apiKey) {
+    throw new Error(
+      "OPENAI_API_KEY is not configured.",
+    );
   }
 
-  let taskInstruction =
-    "Analyze this lead and return a useful CRM assessment.";
+  const controller =
+    new AbortController();
 
-  if (
-    analysisType ===
-    "lead_scoring"
-  ) {
-    taskInstruction =
-      "Score the lead based on buying intent, qualification quality, activity, requirements, matching properties, and sales readiness.";
-  }
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, 20_000);
 
-  if (
-    analysisType ===
-    "lead_summary"
-  ) {
-    taskInstruction =
-      "Create a concise factual summary of the lead using only the supplied CRM data.";
-  }
+  let response: Response;
 
-  if (
-    analysisType ===
-    "next_action"
-  ) {
-    taskInstruction =
-      "Determine the single most useful next sales action for the assigned agent to take now. Make it concrete and actionable.";
-  }
-
-  if (
-    analysisType ===
-    "property_match"
-  ) {
-    taskInstruction = `
-Analyze the supplied property candidates against the lead's actual requirements.
-
-Evaluate:
-- budget fit
-- preferred location
-- property type
-- bedroom requirement
-- availability
-- overall suitability
-
-Identify the strongest property candidate.
-
-Explain why it is the strongest match and what the agent should do next.
-
-Do not invent any property details.
-Do not invent availability.
-Use only the supplied CRM data.
-`;
-  }
-
-  if (
-    analysisType ===
-      "message_generation" &&
-    channel
-  ) {
-    const channelRules =
-      channel ===
-      "whatsapp"
-        ? "Write a natural WhatsApp message. Friendly, concise, conversational, and professional."
-        : channel ===
-            "sms"
-          ? "Write a very concise SMS that is easy to read and reply to."
-          : "Write a professional sales email. Include a subject line and concise body.";
-
-    taskInstruction = `
-Generate a personalized ${channel} message for the lead.
-
-${channelRules}
-
-Use the lead's actual name and relevant CRM context.
-Use property information only when it is present in the supplied CRM data.
-Do not invent property features, availability, price, location, appointments, or promises.
-Do not mention AI.
-`;
-  }
-
-  const prompt = `
-You are an AI sales intelligence engine for PropFlow, a real estate CRM.
-
-TASK:
-${taskInstruction}
-
-LEAD
-${JSON.stringify(
-  lead,
-  null,
-  2,
-)}
-
-ACTIVITIES
-${JSON.stringify(
-  activities,
-  null,
-  2,
-)}
-
-PROPERTY CANDIDATES
-${JSON.stringify(
-  matchedProperties,
-  null,
-  2,
-)}
-
-FOLLOW-UPS
-${JSON.stringify(
-  followUps,
-  null,
-  2,
-)}
-
-${
-  analysisType ===
-    "message_generation" &&
-  channel
-    ? `
-MESSAGE CHANNEL:
-${channel}
-
-For message_generation, put the final message in "recommendation".
-For email, include the subject line at the beginning of "recommendation".
-`
-    : ""
-}
-
-Return ONLY valid JSON:
-
-{
-  "score": 0,
-  "priority": "cold",
-  "summary": "string",
-  "recommendation": "string"
-}
-
-Rules:
-- score must be an integer from 0 to 100 when applicable
-- property_match score should represent the strongest candidate match
-- priority must be exactly cold, warm, or hot
-- summary must be concise and factual
-- recommendation must be actionable
-- for property_match, recommendation must name the strongest property and explain why
-- for message_generation, recommendation must contain only the final message
-- never invent information
-- do not return markdown
-- do not return extra JSON keys
-`;
-
-  const response =
-    await fetch(
+  try {
+    response = await fetch(
       "https://api.openai.com/v1/chat/completions",
       {
         method: "POST",
@@ -770,6 +254,8 @@ Rules:
           "Content-Type":
             "application/json",
         },
+        signal:
+          controller.signal,
         body: JSON.stringify({
           model,
           temperature:
@@ -788,106 +274,442 @@ Rules:
             },
             {
               role: "user",
-              content:
-                prompt,
+              content: prompt,
             },
           ],
         }),
       },
     );
+  } catch (error) {
+    if (
+      error instanceof
+        DOMException &&
+      error.name === "AbortError"
+    ) {
+      throw new Error(
+        "AI request timed out.",
+      );
+    }
 
-  if (
-    !response.ok
-  ) {
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
     const errorText =
       await response.text();
 
+    console.error(
+      "[AI Lead Analysis] OpenAI provider error:",
+      response.status,
+      errorText,
+    );
+
     throw new Error(
-      `AI provider request failed: ${response.status} ${errorText}`,
+      "AI provider request failed.",
     );
   }
 
-  const result =
-    (await response.json()) as {
-      choices?: Array<{
-        message?: {
-          content?: string;
-        };
-      }>;
-    };
+  const data =
+    await response.json();
 
   const content =
-    result
-      .choices?.[0]
-      ?.message
+    data?.choices?.[0]?.message
       ?.content;
 
-  if (!content) {
-    throw new Error(
-      "AI provider returned an empty response.",
-    );
-  }
-
-  let parsed: AIResponse;
-
-  try {
-    parsed =
-      JSON.parse(
-        content,
-      ) as AIResponse;
-  } catch {
-    throw new Error(
-      "AI provider returned invalid JSON.",
-    );
-  }
-
-  const score =
-    analysisType ===
-    "message_generation"
-      ? null
-      : clampScore(
-          parsed.score,
-        );
-
-  const priority =
-    normalizePriority(
-      parsed.priority,
-      Number(
-        score ??
-          lead.lead_score ??
-          0,
-      ),
-    );
-
-  const summary =
-    typeof parsed.summary ===
-    "string"
-      ? parsed.summary.trim()
-      : "";
-
-  const recommendation =
-    typeof parsed.recommendation ===
-    "string"
-      ? parsed.recommendation.trim()
-      : "";
-
   if (
-    !summary ||
-    !recommendation
+    typeof content !== "string" ||
+    content.trim().length === 0
   ) {
     throw new Error(
-      "AI response did not contain the required analysis fields.",
+      "AI returned an empty response.",
+    );
+  }
+
+  return safeJsonParse(
+    content,
+  );
+}
+
+function normalizeAnalysis(
+  analysis: AIResponse,
+): AIResponse {
+  return {
+    score:
+      typeof analysis.score ===
+      "number"
+        ? clampScore(
+            analysis.score,
+          )
+        : undefined,
+    priority:
+      analysis.priority
+        ? normalizePriority(
+            analysis.priority,
+          )
+        : undefined,
+    summary:
+      typeof analysis.summary ===
+      "string"
+        ? analysis.summary.trim()
+        : undefined,
+    recommendation:
+      typeof analysis.recommendation ===
+      "string"
+        ? analysis.recommendation.trim()
+        : undefined,
+  };
+}
+
+function buildPrompt(
+  analysisType: AnalysisType,
+  lead: LeadRow,
+  activities: ActivityRow[],
+  followUps: FollowUpRow[],
+  matches: PropertyMatchRow[],
+  properties: PropertyRow[],
+  channel?: MessageChannel,
+) {
+  const leadContext =
+    JSON.stringify(
+      buildLeadContext(lead),
+      null,
+      2,
+    );
+
+  const activityContext =
+    JSON.stringify(
+      activities,
+      null,
+      2,
+    );
+
+  const followUpContext =
+    JSON.stringify(
+      followUps,
+      null,
+      2,
+    );
+
+  const matchContext =
+    JSON.stringify(
+      matches,
+      null,
+      2,
+    );
+
+  const propertyContext =
+    JSON.stringify(
+      properties.map(
+        buildPropertyContext,
+      ),
+      null,
+      2,
+    );
+
+  if (
+    analysisType ===
+    "lead_scoring"
+  ) {
+    return `
+You are analyzing a real-estate CRM lead.
+
+Return JSON only with this structure:
+{
+  "score": number,
+  "priority": "cold" | "warm" | "hot",
+  "summary": string,
+  "recommendation": string
+}
+
+Scoring requirements:
+- score must be between 0 and 100
+- higher intent, realistic budget, suitable property need, recent engagement, and shorter purchase timeline should increase the score
+- stale engagement, unclear need, unrealistic budget, or long timeline should reduce the score
+- never invent facts not present in the data
+- priority should correspond meaningfully to the score
+
+Lead:
+${leadContext}
+
+Activities:
+${activityContext}
+
+Follow-ups:
+${followUpContext}
+
+Matched properties:
+${matchContext}
+
+Properties:
+${propertyContext}
+`;
+  }
+
+  if (
+    analysisType ===
+    "lead_summary"
+  ) {
+    return `
+Summarize this real-estate CRM lead for a sales agent.
+
+Return JSON only:
+{
+  "summary": string,
+  "recommendation": string
+}
+
+Do not invent facts.
+Keep the summary concise but useful.
+Identify important intent signals, risks, and the current sales situation.
+
+Lead:
+${leadContext}
+
+Activities:
+${activityContext}
+
+Follow-ups:
+${followUpContext}
+
+Matched properties:
+${matchContext}
+
+Properties:
+${propertyContext}
+`;
+  }
+
+  if (
+    analysisType ===
+    "next_action"
+  ) {
+    return `
+Determine the best next action for a real-estate sales agent handling this lead.
+
+Return JSON only:
+{
+  "summary": string,
+  "recommendation": string
+}
+
+The recommendation should be actionable and specific.
+Use existing activity, follow-up, and property-match information.
+Do not invent facts.
+
+Lead:
+${leadContext}
+
+Activities:
+${activityContext}
+
+Follow-ups:
+${followUpContext}
+
+Matched properties:
+${matchContext}
+
+Properties:
+${propertyContext}
+`;
+  }
+
+  if (
+    analysisType ===
+    "message_generation"
+  ) {
+    return `
+Generate a professional follow-up message for a real-estate CRM lead.
+
+Channel:
+${channel ?? "whatsapp"}
+
+Return JSON only:
+{
+  "recommendation": string
+}
+
+Rules:
+- Use only facts from the provided CRM data.
+- Do not invent property prices, features, locations, appointment times, or commitments.
+- Keep the tone professional and natural.
+- For WhatsApp/SMS keep it concise.
+- For email it can be slightly more detailed.
+- Do not reveal internal scoring or internal CRM fields.
+
+Lead:
+${leadContext}
+
+Activities:
+${activityContext}
+
+Follow-ups:
+${followUpContext}
+
+Matched properties:
+${matchContext}
+
+Properties:
+${propertyContext}
+`;
+  }
+
+  return `
+Analyze which properties are the strongest matches for this real-estate lead.
+
+Return JSON only:
+{
+  "summary": string,
+  "recommendation": string
+}
+
+Use only the supplied CRM data.
+Do not invent property details.
+Explain the important matching factors such as budget, location, property type, bedrooms, and timeline.
+
+Lead:
+${leadContext}
+
+Properties:
+${propertyContext}
+`;
+}
+
+function getModel(
+  analysisType: AnalysisType,
+) {
+  if (
+    analysisType ===
+    "message_generation"
+  ) {
+    return (
+      process.env.OPENAI_MESSAGE_MODEL ??
+      process.env.OPENAI_MODEL ??
+      "gpt-4o-mini"
+    );
+  }
+
+  return (
+    process.env.OPENAI_MODEL ??
+    "gpt-4o-mini"
+  );
+}
+
+async function getAuthorizedLead(
+  supabase: Awaited<
+    ReturnType<typeof createClient>
+  >,
+  leadId: string,
+) {
+  const {
+    data: userData,
+    error: userError,
+  } =
+    await supabase.auth.getUser();
+
+  if (userError) {
+    throw new Error(
+      "Unable to verify authentication.",
+    );
+  }
+
+  if (!userData.user) {
+    throw new Error(
+      "Authentication required.",
+    );
+  }
+
+  const {
+    data: profile,
+    error: profileError,
+  } =
+    await supabase
+      .from("profiles")
+      .select(
+        "id, organization_id, role",
+      )
+      .eq(
+        "id",
+        userData.user.id,
+      )
+      .single();
+
+  if (profileError || !profile) {
+    throw new Error(
+      "Unable to resolve user profile.",
+    );
+  }
+
+  let leadQuery =
+    supabase
+      .from("leads")
+      .select(
+        `
+          id,
+          organization_id,
+          full_name,
+          email,
+          phone,
+          source,
+          budget_min,
+          budget_max,
+          preferred_location,
+          property_type,
+          bedrooms,
+          purchase_timeline,
+          status,
+          priority,
+          lead_score,
+          assigned_agent_id,
+          last_contacted_at,
+          next_follow_up_at,
+          notes,
+          created_at,
+          updated_at
+        `,
+      )
+      .eq(
+        "id",
+        leadId,
+      )
+      .eq(
+        "organization_id",
+        profile.organization_id,
+      );
+
+  if (
+    profile.role ===
+    "agent"
+  ) {
+    leadQuery =
+      leadQuery.eq(
+        "assigned_agent_id",
+        userData.user.id,
+      );
+  }
+
+  const {
+    data: lead,
+    error: leadError,
+  } = await leadQuery.maybeSingle();
+
+  if (leadError) {
+    throw new Error(
+      "Unable to load lead.",
+    );
+  }
+
+  if (!lead) {
+    throw new Error(
+      "Lead not found or access denied.",
     );
   }
 
   return {
-    score,
-    priority,
-    summary,
-    recommendation,
-    model,
-    rawResponse:
-      parsed,
+    user: userData.user,
+    profile,
+    lead: lead as LeadRow,
   };
 }
 
@@ -896,14 +718,13 @@ export async function POST(
 ) {
   try {
     const body =
-      (await request.json()) as {
-        leadId?: string;
-        analysisType?: AnalysisType;
-        channel?: MessageChannel;
-      };
+      (await request.json()) as RequestBody;
 
     const leadId =
-      body.leadId?.trim();
+      typeof body.leadId ===
+      "string"
+        ? body.leadId.trim()
+        : "";
 
     const analysisType =
       body.analysisType;
@@ -970,125 +791,76 @@ export async function POST(
     const supabase =
       await createClient();
 
-    const {
-      data: {
-        user,
-      },
-    } =
-      await supabase.auth.getUser();
+    let authContext:
+      Awaited<
+        ReturnType<
+          typeof getAuthorizedLead
+        >
+      >;
 
-    if (!user) {
-      return NextResponse.json(
-        {
-          error:
-            "Authentication required.",
-        },
-        {
-          status: 401,
-        },
-      );
-    }
-
-    const {
-      data: profile,
-      error:
-        profileError,
-    } =
-      await supabase
-        .from("profiles")
-        .select(
-          "organization_id",
-        )
-        .eq(
-          "id",
-          user.id,
-        )
-        .single();
-
-    if (
-      profileError ||
-      !profile?.organization_id
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Unable to resolve your organization.",
-        },
-        {
-          status: 403,
-        },
-      );
-    }
-
-    const {
-      data: leadData,
-      error:
-        leadError,
-    } =
-      await supabase
-        .from("leads")
-        .select(
-          `
-            id,
-            organization_id,
-            full_name,
-            email,
-            phone,
-            source,
-            budget_min,
-            budget_max,
-            preferred_location,
-            property_type,
-            bedrooms,
-            purchase_timeline,
-            status,
-            priority,
-            lead_score,
-            assigned_agent_id,
-            last_contacted_at,
-            next_follow_up_at,
-            notes,
-            created_at,
-            updated_at
-          `,
-        )
-        .eq(
-          "id",
+    try {
+      authContext =
+        await getAuthorizedLead(
+          supabase,
           leadId,
-        )
-        .single();
+        );
+    } catch (error) {
+      const message =
+        getErrorMessage(error);
 
-    if (
-      leadError
-    ) {
+      if (
+        message ===
+        "Authentication required."
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Authentication required.",
+          },
+          {
+            status: 401,
+          },
+        );
+      }
+
+      if (
+        message ===
+        "Lead not found or access denied."
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Lead not found or access denied.",
+          },
+          {
+            status: 404,
+          },
+        );
+      }
+
+      console.error(
+        "[AI Lead Analysis] Authorization/query error:",
+        error,
+      );
+
       return NextResponse.json(
         {
           error:
-            leadError.message,
+            "Unable to load lead.",
         },
         {
-          status: 404,
+          status: 500,
         },
       );
     }
 
-    const lead =
-      leadData as LeadRow;
+    const {
+      profile,
+      lead,
+    } = authContext;
 
-    if (
-      lead.organization_id !==
-      profile.organization_id
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Lead does not belong to your organization.",
-        },
-        {
-          status: 403,
-        },
-      );
-    }
+    const organizationId =
+      profile.organization_id;
 
     const [
       activitiesResult,
@@ -1101,10 +873,17 @@ export async function POST(
           .select(
             `
               id,
+              organization_id,
+              lead_id,
               type,
+              subject,
               description,
               created_at
             `,
+          )
+          .eq(
+            "organization_id",
+            organizationId,
           )
           .eq(
             "lead_id",
@@ -1113,22 +892,21 @@ export async function POST(
           .order(
             "created_at",
             {
-              ascending:
-                false,
+              ascending: false,
             },
           )
-          .limit(20),
+          .limit(50),
 
         supabase
-          .from(
-            "lead_properties",
-          )
+          .from("lead_properties")
           .select(
             `
               id,
               property_id,
               match_score,
-              match_reason
+              match_reason,
+              created_at,
+              updated_at
             `,
           )
           .eq(
@@ -1138,10 +916,7 @@ export async function POST(
           .order(
             "match_score",
             {
-              ascending:
-                false,
-              nullsFirst:
-                false,
+              ascending: false,
             },
           )
           .limit(20),
@@ -1151,11 +926,20 @@ export async function POST(
           .select(
             `
               id,
+              organization_id,
+              lead_id,
+              assigned_to,
               due_at,
               type,
               notes,
-              status
+              status,
+              completed_at,
+              created_at
             `,
+          )
+          .eq(
+            "organization_id",
+            organizationId,
           )
           .eq(
             "lead_id",
@@ -1164,21 +948,24 @@ export async function POST(
           .order(
             "due_at",
             {
-              ascending:
-                true,
+              ascending: false,
             },
           )
-          .limit(10),
+          .limit(20),
       ]);
 
     if (
       activitiesResult.error
     ) {
+      console.error(
+        "[AI Lead Analysis] Activities query failed:",
+        activitiesResult.error,
+      );
+
       return NextResponse.json(
         {
           error:
-            activitiesResult.error
-              .message,
+            "Unable to load lead activity.",
         },
         {
           status: 500,
@@ -1189,11 +976,15 @@ export async function POST(
     if (
       matchesResult.error
     ) {
+      console.error(
+        "[AI Lead Analysis] Match query failed:",
+        matchesResult.error,
+      );
+
       return NextResponse.json(
         {
           error:
-            matchesResult.error
-              .message,
+            "Unable to load property matches.",
         },
         {
           status: 500,
@@ -1204,11 +995,15 @@ export async function POST(
     if (
       followUpsResult.error
     ) {
+      console.error(
+        "[AI Lead Analysis] Follow-up query failed:",
+        followUpsResult.error,
+      );
+
       return NextResponse.json(
         {
           error:
-            followUpsResult.error
-              .message,
+            "Unable to load follow-up data.",
         },
         {
           status: 500,
@@ -1220,35 +1015,33 @@ export async function POST(
       (activitiesResult.data ??
         []) as ActivityRow[];
 
+    const matches =
+      (matchesResult.data ??
+        []) as PropertyMatchRow[];
+
     const followUps =
       (followUpsResult.data ??
         []) as FollowUpRow[];
 
-    const existingMatches =
-      (matchesResult.data ??
-        []) as MatchRow[];
-
-    const existingPropertyIds =
+    const propertyIds =
       Array.from(
         new Set(
-          existingMatches.map(
-            (item) =>
-              item.property_id,
-          ),
+          matches
+            .map(
+              (
+                match,
+              ) =>
+                match.property_id,
+            )
+            .filter(Boolean),
         ),
       );
 
-    let candidateProperties:
-      PropertyRow[] = [];
+    let properties: PropertyRow[] =
+      [];
 
-    /*
-     * For property_match we intentionally load the available
-     * inventory as well, so the AI can find a strong candidate
-     * even before the regular lead_properties matching has run.
-     */
     if (
-      analysisType ===
-      "property_match"
+      propertyIds.length > 0
     ) {
       const {
         data: propertyData,
@@ -1260,6 +1053,7 @@ export async function POST(
           .select(
             `
               id,
+              organization_id,
               title,
               description,
               property_type,
@@ -1272,73 +1066,32 @@ export async function POST(
               bathrooms,
               area,
               area_unit,
-              image_url
+              image_url,
+              created_at,
+              updated_at
             `,
           )
           .eq(
-            "status",
-            "available",
-          )
-          .limit(100);
-
-      if (
-        propertyError
-      ) {
-        return NextResponse.json(
-          {
-            error:
-              propertyError.message,
-          },
-          {
-            status: 500,
-          },
-        );
-      }
-
-      candidateProperties =
-        (propertyData ??
-          []) as PropertyRow[];
-    } else if (
-      existingPropertyIds.length >
-      0
-    ) {
-      const {
-        data: propertyData,
-        error:
-          propertyError,
-      } =
-        await supabase
-          .from("properties")
-          .select(
-            `
-              id,
-              title,
-              description,
-              property_type,
-              status,
-              price,
-              currency,
-              location,
-              address,
-              bedrooms,
-              bathrooms,
-              area,
-              area_unit,
-              image_url
-            `,
+            "organization_id",
+            organizationId,
           )
           .in(
             "id",
-            existingPropertyIds,
+            propertyIds,
           );
 
       if (
         propertyError
       ) {
+        console.error(
+          "[AI Lead Analysis] Matched property query failed:",
+          propertyError,
+        );
+
         return NextResponse.json(
           {
             error:
-              propertyError.message,
+              "Unable to load property matches.",
           },
           {
             status: 500,
@@ -1346,182 +1099,128 @@ export async function POST(
         );
       }
 
-      candidateProperties =
+      properties =
         (propertyData ??
           []) as PropertyRow[];
     }
 
-    const rankedProperties =
-      candidateProperties
-        .map(
-          (property) =>
-            calculatePropertyMatch(
-              lead,
-              property,
-            ),
-        )
-        .sort(
-          (a, b) =>
-            b.match_score -
-            a.match_score,
-        )
-        .slice(
-          0,
-          15,
-        );
+    const prompt =
+      buildPrompt(
+        analysisType,
+        lead,
+        activities,
+        followUps,
+        matches,
+        properties,
+        channel,
+      );
+
+    const model =
+      getModel(
+        analysisType,
+      );
+
+    const aiAnalysis =
+      normalizeAnalysis(
+        await callOpenAI(
+          prompt,
+          model,
+          analysisType,
+        ),
+      );
 
     if (
       analysisType ===
       "property_match"
     ) {
-      /*
-       * Store/update the top AI-prepared candidates in lead_properties.
-       * Existing manual/rule-based match workflow remains compatible.
-       */
-      if (
-        rankedProperties.length >
-        0
-      ) {
-        for (
-          const ranked of rankedProperties
-        ) {
-          const {
-            data: existingRow,
-          } =
-            await supabase
-              .from(
-                "lead_properties",
-              )
-              .select(
-                "id",
-              )
-              .eq(
-                "lead_id",
-                lead.id,
-              )
-              .eq(
-                "property_id",
-                ranked
-                  .property
-                  .id,
-              )
-              .maybeSingle();
-
-          if (
-            existingRow
-          ) {
-            await supabase
-              .from(
-                "lead_properties",
-              )
-              .update({
-                match_score:
-                  ranked.match_score,
-                match_reason:
-                  ranked.match_reason,
-              })
-              .eq(
-                "id",
-                existingRow.id,
+      const propertyMatchData =
+        properties.map(
+          (property) => {
+            const existing =
+              matches.find(
+                (match) =>
+                  match.property_id ===
+                  property.id,
               );
-          } else {
-            await supabase
-              .from(
-                "lead_properties",
-              )
-              .insert({
-                lead_id:
-                  lead.id,
-                property_id:
-                  ranked
-                    .property
-                    .id,
-                match_score:
-                  ranked.match_score,
-                match_reason:
-                  ranked.match_reason,
-              });
-          }
-        }
-      }
-    }
 
-    const analysis =
-      await callAI(
-        lead,
-        activities,
-        rankedProperties,
-        followUps,
+            return {
+              property_id:
+                property.id,
+              match_score:
+                clampScore(
+                  existing?.match_score ??
+                    0,
+                ),
+              match_reason:
+                existing
+                  ?.match_reason ??
+                null,
+            };
+          },
+        );
+
+      return NextResponse.json({
+        success: true,
         analysisType,
-        channel,
-      );
-
-    const analysisRow = {
-      organization_id:
-        profile.organization_id,
-      lead_id:
-        lead.id,
-      analysis_type:
-        analysisType,
-      score:
-        analysis.score,
-      priority:
-        analysis.priority,
-      summary:
-        analysis.summary,
-      recommendation:
-        analysis.recommendation,
-      raw_response:
-        analysis.rawResponse,
-      model:
-        analysis.model,
-    };
-
-    const {
-      data: savedAnalysis,
-      error:
-        saveError,
-    } =
-      await supabase
-        .from("ai_analyses")
-        .insert(
-          analysisRow,
-        )
-        .select(
-          `
-            id,
-            organization_id,
-            lead_id,
-            analysis_type,
-            score,
-            priority,
-            summary,
-            recommendation,
-            raw_response,
-            model,
-            created_at
-          `,
-        )
-        .single();
-
-    if (
-      saveError
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            saveError.message,
-        },
-        {
-          status: 500,
-        },
-      );
+        leadId: lead.id,
+        organizationId,
+        analysis: aiAnalysis,
+        properties,
+        matches:
+          propertyMatchData,
+      });
     }
 
     if (
       analysisType ===
       "lead_scoring"
     ) {
+      const score =
+        clampScore(
+          aiAnalysis.score,
+        );
+
+      const priority =
+        normalizePriority(
+          aiAnalysis.priority,
+        );
+
+      const {
+        error:
+          saveError,
+      } =
+        await supabase
+          .from("ai_analyses")
+          .insert({
+            organization_id:
+              organizationId,
+            lead_id:
+              lead.id,
+            analysis_type:
+              analysisType,
+            result:
+              aiAnalysis,
+          });
+
+      if (
+        saveError
+      ) {
+        console.error(
+          "[AI Lead Analysis] Failed to save analysis:",
+          saveError,
+        );
+
+        return NextResponse.json(
+          {
+            error:
+              "Unable to save AI analysis.",
+          },
+          {
+            status: 500,
+          },
+        );
+      }
+
       const {
         error:
           leadUpdateError,
@@ -1529,57 +1228,98 @@ export async function POST(
         await supabase
           .from("leads")
           .update({
-            lead_score:
-              analysis.score,
-            priority:
-              analysis.priority,
+            lead_score: score,
+            priority,
             updated_at:
               new Date().toISOString(),
           })
           .eq(
             "id",
             lead.id,
+          )
+          .eq(
+            "organization_id",
+            organizationId,
           );
 
       if (
         leadUpdateError
       ) {
+        console.error(
+          "[AI Lead Analysis] Failed to update lead score:",
+          leadUpdateError,
+        );
+
         return NextResponse.json(
           {
             error:
-              leadUpdateError.message,
+              "Unable to update lead scoring.",
           },
           {
             status: 500,
           },
         );
       }
+
+      return NextResponse.json({
+        success: true,
+        analysisType,
+        leadId: lead.id,
+        organizationId,
+        analysis: {
+          ...aiAnalysis,
+          score,
+          priority,
+        },
+      });
+    }
+
+    const {
+      error:
+        saveError,
+    } =
+      await supabase
+        .from("ai_analyses")
+        .insert({
+          organization_id:
+            organizationId,
+          lead_id:
+            lead.id,
+          analysis_type:
+            analysisType,
+          result:
+            aiAnalysis,
+        });
+
+    if (
+      saveError
+    ) {
+      console.error(
+        "[AI Lead Analysis] Failed to save analysis:",
+        saveError,
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "Unable to save AI analysis.",
+        },
+        {
+          status: 500,
+        },
+      );
     }
 
     return NextResponse.json({
       success: true,
-      analysis:
-        savedAnalysis,
-      propertyMatches:
-        analysisType ===
-        "property_match"
-          ? rankedProperties.map(
-              (item) => ({
-                property_id:
-                  item
-                    .property
-                    .id,
-                title:
-                  item
-                    .property
-                    .title,
-                score:
-                  item.match_score,
-                reason:
-                  item.match_reason,
-              }),
-            )
-          : undefined,
+      analysisType,
+      leadId: lead.id,
+      organizationId,
+      analysis: aiAnalysis,
+      properties,
+      matches,
+      activities,
+      followUps,
     });
   } catch (error) {
     console.error(
@@ -1590,10 +1330,7 @@ export async function POST(
     return NextResponse.json(
       {
         error:
-          error instanceof
-          Error
-            ? error.message
-            : "Unexpected AI analysis error.",
+          "Unable to complete AI analysis right now.",
       },
       {
         status: 500,

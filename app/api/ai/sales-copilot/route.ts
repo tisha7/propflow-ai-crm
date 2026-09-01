@@ -364,7 +364,7 @@ export async function POST(
       return NextResponse.json(
         {
           error:
-            leadError.message,
+            "Unable to load lead.",
         },
         {
           status: 404,
@@ -474,8 +474,7 @@ export async function POST(
       return NextResponse.json(
         {
           error:
-            activitiesResult.error
-              .message,
+            "Unable to load recent activity.",
         },
         {
           status: 500,
@@ -489,8 +488,7 @@ export async function POST(
       return NextResponse.json(
         {
           error:
-            followUpsResult.error
-              .message,
+            "Unable to load follow-up data.",
         },
         {
           status: 500,
@@ -504,8 +502,7 @@ export async function POST(
       return NextResponse.json(
         {
           error:
-            matchesResult.error
-              .message,
+            "Unable to load property matches.",
         },
         {
           status: 500,
@@ -578,7 +575,7 @@ export async function POST(
         return NextResponse.json(
           {
             error:
-              propertyError.message,
+              "Unable to load matched properties.",
           },
           {
             status: 500,
@@ -699,53 +696,80 @@ Rules:
 - Do not mention that you are an AI.
 `;
 
-    const response =
-      await fetch(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          method:
-            "POST",
-          headers: {
-            Authorization:
-              `Bearer ${apiKey}`,
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify(
-            {
-              model,
-              temperature:
-                0.35,
-              response_format:
-                {
-                  type: "json_object",
-                },
-              messages: [
-                {
-                  role: "system",
-                  content:
-                    "You are a precise real-estate sales copilot. Return JSON only.",
-                },
-                {
-                  role: "user",
-                  content:
-                    prompt,
-                },
-              ],
+    const controller =
+      new AbortController();
+
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, 20_000);
+
+    let response: Response;
+
+    try {
+      response =
+        await fetch(
+          "https://api.openai.com/v1/chat/completions",
+          {
+            method:
+              "POST",
+            headers: {
+              Authorization:
+                `Bearer ${apiKey}`,
+              "Content-Type":
+                "application/json",
             },
-          ),
-        },
-      );
+            signal:
+              controller.signal,
+            body: JSON.stringify(
+              {
+                model,
+                temperature:
+                  0.35,
+                response_format:
+                  {
+                    type: "json_object",
+                  },
+                messages: [
+                  {
+                    role: "system",
+                    content:
+                      "You are a precise real-estate sales copilot. Return JSON only.",
+                  },
+                  {
+                    role: "user",
+                    content:
+                      prompt,
+                  },
+                ],
+              },
+            ),
+          },
+        );
+    } catch (error) {
+      if (
+        error instanceof DOMException &&
+        error.name === "AbortError"
+      ) {
+        throw new Error(
+          "AI request timed out.",
+        );
+      }
+
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (
       !response.ok
     ) {
-      const text =
+      const providerError =
         await response.text();
 
       console.error(
-        "[Sales Copilot]",
-        text,
+        "[Sales Copilot] OpenAI provider error:",
+        response.status,
+        providerError,
       );
 
       return NextResponse.json({
@@ -853,10 +877,7 @@ Rules:
     return NextResponse.json(
       {
         error:
-          error instanceof
-          Error
-            ? error.message
-            : "Sales Copilot failed.",
+          "Unable to complete Sales Copilot right now.",
       },
       {
         status: 500,
