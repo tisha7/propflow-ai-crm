@@ -32,6 +32,12 @@ type Member = {
   created_at: string;
 };
 
+type InviteResponse = {
+  success?: boolean;
+  message?: string;
+  error?: string;
+};
+
 const ROLE_OPTIONS: TeamRole[] = [
   "admin",
   "manager",
@@ -57,198 +63,348 @@ function roleClasses(role: TeamRole) {
   return "border-border bg-surface-sunken text-ink-600";
 }
 
+function getInitials(
+  fullName: string,
+) {
+  return fullName
+    .trim()
+    .split(/\s+/)
+    .map((part) =>
+      part.charAt(0),
+    )
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
+async function parseInviteResponse(
+  response: Response,
+): Promise<InviteResponse> {
+  const text =
+    await response.text();
+
+  if (!text.trim()) {
+    return {
+      success:
+        response.ok,
+      error: response.ok
+        ? undefined
+        : `Server returned HTTP ${response.status} with an empty response.`,
+    };
+  }
+
+  try {
+    return JSON.parse(
+      text,
+    ) as InviteResponse;
+  } catch {
+    return {
+      success: false,
+      error:
+        text.trim().slice(
+          0,
+          500,
+        ) ||
+        `Server returned HTTP ${response.status}.`,
+    };
+  }
+}
+
 export default function TeamPage() {
   const supabase = useMemo(
     () => createClient(),
     [],
   );
 
-  const [currentUserId, setCurrentUserId] =
-    useState<string | null>(null);
+  const [
+    currentUserId,
+    setCurrentUserId,
+  ] = useState<string | null>(
+    null,
+  );
 
-  const [currentRole, setCurrentRole] =
-    useState<TeamRole | null>(null);
+  const [
+    currentRole,
+    setCurrentRole,
+  ] = useState<TeamRole | null>(
+    null,
+  );
 
-  const [organizationId, setOrganizationId] =
-    useState<string | null>(null);
+  const [
+    organizationId,
+    setOrganizationId,
+  ] = useState<string | null>(
+    null,
+  );
 
-  const [members, setMembers] =
-    useState<Member[]>([]);
+  const [
+    members,
+    setMembers,
+  ] = useState<Member[]>([]);
 
-  const [loading, setLoading] =
-    useState(true);
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
 
-  const [error, setError] =
-    useState("");
+  const [
+    error,
+    setError,
+  ] = useState("");
 
-  const [success, setSuccess] =
-    useState("");
+  const [
+    success,
+    setSuccess,
+  ] = useState("");
 
-  const [search, setSearch] =
-    useState("");
+  const [
+    search,
+    setSearch,
+  ] = useState("");
 
-  const [roleFilter, setRoleFilter] =
-    useState<TeamRole | "all">("all");
+  const [
+    roleFilter,
+    setRoleFilter,
+  ] = useState<
+    TeamRole | "all"
+  >("all");
 
-  const [changingRoleId, setChangingRoleId] =
-    useState<string | null>(null);
+  const [
+    changingRoleId,
+    setChangingRoleId,
+  ] = useState<string | null>(
+    null,
+  );
 
-  const [inviteOpen, setInviteOpen] =
-    useState(false);
+  const [
+    inviteOpen,
+    setInviteOpen,
+  ] = useState(false);
 
-  const [inviteName, setInviteName] =
-    useState("");
+  const [
+    inviteName,
+    setInviteName,
+  ] = useState("");
 
-  const [inviteEmail, setInviteEmail] =
-    useState("");
+  const [
+    inviteEmail,
+    setInviteEmail,
+  ] = useState("");
 
-  const [inviteRole, setInviteRole] =
-    useState<TeamRole>("agent");
+  const [
+    inviteRole,
+    setInviteRole,
+  ] = useState<TeamRole>(
+    "agent",
+  );
 
-  const [inviting, setInviting] =
-    useState(false);
+  const [
+    inviting,
+    setInviting,
+  ] = useState(false);
 
-  const loadTeam = useCallback(async () => {
-    setLoading(true);
-    setError("");
+  const loadTeam =
+    useCallback(
+      async () => {
+        setLoading(true);
+        setError("");
 
-    const {
-      data: {
-        user,
+        try {
+          const {
+            data: {
+              user,
+            },
+            error: authError,
+          } =
+            await supabase.auth.getUser();
+
+          if (
+            authError
+          ) {
+            throw new Error(
+              authError.message,
+            );
+          }
+
+          if (!user) {
+            throw new Error(
+              "Your session has expired. Please sign in again.",
+            );
+          }
+
+          setCurrentUserId(
+            user.id,
+          );
+
+          const {
+            data: myProfile,
+            error:
+              profileError,
+          } =
+            await supabase
+              .from(
+                "profiles",
+              )
+              .select(
+                "id, organization_id, role",
+              )
+              .eq(
+                "id",
+                user.id,
+              )
+              .single();
+
+          if (
+            profileError ||
+            !myProfile
+          ) {
+            throw new Error(
+              profileError?.message ??
+                "Unable to load your profile.",
+            );
+          }
+
+          setOrganizationId(
+            myProfile.organization_id,
+          );
+
+          setCurrentRole(
+            myProfile.role as TeamRole,
+          );
+
+          const {
+            data,
+            error:
+              membersError,
+          } =
+            await supabase
+              .from(
+                "profiles",
+              )
+              .select(
+                "id, full_name, role, organization_id, created_at",
+              )
+              .eq(
+                "organization_id",
+                myProfile.organization_id,
+              )
+              .order(
+                "full_name",
+                {
+                  ascending:
+                    true,
+                },
+              );
+
+          if (
+            membersError
+          ) {
+            throw new Error(
+              membersError.message,
+            );
+          }
+
+          setMembers(
+            (data ??
+              []) as Member[],
+          );
+        } catch (
+          loadError
+        ) {
+          setError(
+            loadError instanceof
+              Error
+              ? loadError.message
+              : "Unable to load team members.",
+          );
+        } finally {
+          setLoading(false);
+        }
       },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      setError(
-        "Your session has expired. Please sign in again.",
-      );
-      setLoading(false);
-      return;
-    }
-
-    setCurrentUserId(user.id);
-
-    const {
-      data: myProfile,
-      error: myProfileError,
-    } = await supabase
-      .from("profiles")
-      .select(
-        "id, organization_id, role",
-      )
-      .eq("id", user.id)
-      .single();
-
-    if (
-      myProfileError ||
-      !myProfile
-    ) {
-      setError(
-        myProfileError?.message ??
-          "Unable to load your profile.",
-      );
-      setLoading(false);
-      return;
-    }
-
-    setOrganizationId(
-      myProfile.organization_id,
+      [supabase],
     );
-
-    setCurrentRole(
-      myProfile.role as TeamRole,
-    );
-
-    const {
-      data,
-      error: membersError,
-    } = await supabase
-      .from("profiles")
-      .select(
-        "id, full_name, role, organization_id, created_at",
-      )
-      .eq(
-        "organization_id",
-        myProfile.organization_id,
-      )
-      .order("full_name", {
-        ascending: true,
-      });
-
-    if (membersError) {
-      setError(membersError.message);
-      setMembers([]);
-      setLoading(false);
-      return;
-    }
-
-    setMembers(
-      (data ?? []) as Member[],
-    );
-
-    setLoading(false);
-  }, [supabase]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void loadTeam();
-    }, 0);
+    const timer =
+      window.setTimeout(
+        () => {
+          void loadTeam();
+        },
+        0,
+      );
 
     return () =>
-      window.clearTimeout(timer);
+      window.clearTimeout(
+        timer,
+      );
   }, [loadTeam]);
 
   const isAdmin =
-    currentRole === "admin";
+    currentRole ===
+    "admin";
 
-  const filteredMembers = useMemo(() => {
-    const query = search
-      .trim()
-      .toLowerCase();
+  const filteredMembers =
+    useMemo(() => {
+      const query =
+        search
+          .trim()
+          .toLowerCase();
 
-    return members.filter((member) => {
-      const matchesRole =
-        roleFilter === "all" ||
-        member.role === roleFilter;
+      return members.filter(
+        (member) => {
+          const matchesRole =
+            roleFilter ===
+              "all" ||
+            member.role ===
+              roleFilter;
 
-      const matchesSearch =
-        !query ||
-        member.full_name
-          .toLowerCase()
-          .includes(query) ||
-        member.role
-          .toLowerCase()
-          .includes(query);
+          const matchesSearch =
+            !query ||
+            member.full_name
+              .toLowerCase()
+              .includes(
+                query,
+              ) ||
+            member.role
+              .toLowerCase()
+              .includes(
+                query,
+              );
 
-      return (
-        matchesRole &&
-        matchesSearch
+          return (
+            matchesRole &&
+            matchesSearch
+          );
+        },
       );
-    });
-  }, [
-    members,
-    roleFilter,
-    search,
-  ]);
+    }, [
+      members,
+      roleFilter,
+      search,
+    ]);
 
-  const counts = useMemo(
-    () => ({
-      all: members.length,
-      admin: members.filter(
-        (item) =>
-          item.role === "admin",
-      ).length,
-      manager: members.filter(
-        (item) =>
-          item.role === "manager",
-      ).length,
-      agent: members.filter(
-        (item) =>
-          item.role === "agent",
-      ).length,
-    }),
-    [members],
-  );
+  const counts =
+    useMemo(
+      () => ({
+        all: members.length,
+        admin: members.filter(
+          (item) =>
+            item.role ===
+            "admin",
+        ).length,
+        manager: members.filter(
+          (item) =>
+            item.role ===
+            "manager",
+        ).length,
+        agent: members.filter(
+          (item) =>
+            item.role ===
+            "agent",
+        ).length,
+      }),
+      [members],
+    );
 
   async function changeRole(
     member: Member,
@@ -256,50 +412,76 @@ export default function TeamPage() {
   ) {
     if (
       !isAdmin ||
-      member.id === currentUserId ||
-      member.role === newRole
+      member.id ===
+        currentUserId ||
+      member.role ===
+        newRole
     ) {
       return;
     }
 
-    setChangingRoleId(member.id);
+    setChangingRoleId(
+      member.id,
+    );
     setError("");
     setSuccess("");
 
-    const {
-      error: roleError,
-    } = await supabase.rpc(
-      "admin_change_member_role",
-      {
-        target_user_id: member.id,
-        new_role: newRole,
-      },
-    );
+    try {
+      const {
+        error: roleError,
+      } =
+        await supabase.rpc(
+          "admin_change_member_role",
+          {
+            target_user_id:
+              member.id,
+            new_role:
+              newRole,
+          },
+        );
 
-    if (roleError) {
-      setError(roleError.message);
-      setChangingRoleId(null);
-      return;
+      if (
+        roleError
+      ) {
+        throw new Error(
+          roleError.message,
+        );
+      }
+
+      setMembers(
+        (current) =>
+          current.map(
+            (item) =>
+              item.id ===
+              member.id
+                ? {
+                    ...item,
+                    role:
+                      newRole,
+                  }
+                : item,
+          ),
+      );
+
+      setSuccess(
+        `${member.full_name}'s role was changed to ${formatRole(
+          newRole,
+        )}.`,
+      );
+    } catch (
+      roleError
+    ) {
+      setError(
+        roleError instanceof
+          Error
+          ? roleError.message
+          : "Unable to change member role.",
+      );
+    } finally {
+      setChangingRoleId(
+        null,
+      );
     }
-
-    setMembers((current) =>
-      current.map((item) =>
-        item.id === member.id
-          ? {
-              ...item,
-              role: newRole,
-            }
-          : item,
-      ),
-    );
-
-    setSuccess(
-      `${member.full_name}'s role was changed to ${formatRole(
-        newRole,
-      )}.`,
-    );
-
-    setChangingRoleId(null);
   }
 
   function openInviteModal() {
@@ -363,26 +545,32 @@ export default function TeamPage() {
             headers: {
               "Content-Type":
                 "application/json",
+              Accept:
+                "application/json",
             },
             body: JSON.stringify({
-              email,
               fullName:
                 fullName || null,
-              role: inviteRole,
+              email,
+              role:
+                inviteRole,
             }),
           },
         );
 
       const data =
-        (await response.json()) as {
-          error?: string;
-          message?: string;
-        };
+        await parseInviteResponse(
+          response,
+        );
 
-      if (!response.ok) {
+      if (
+        !response.ok ||
+        data.success === false
+      ) {
         throw new Error(
-          data.error ??
-            "Unable to send invitation.",
+          data.error ||
+            data.message ||
+            `Invitation request failed with HTTP ${response.status}.`,
         );
       }
 
@@ -392,12 +580,15 @@ export default function TeamPage() {
       setInviteRole("agent");
 
       setSuccess(
-        data.message ??
+        data.message ||
           `Invitation sent to ${email}.`,
       );
-    } catch (inviteError) {
+    } catch (
+      inviteError
+    ) {
       setError(
-        inviteError instanceof Error
+        inviteError instanceof
+          Error
           ? inviteError.message
           : "Unable to send invitation.",
       );
@@ -426,22 +617,8 @@ export default function TeamPage() {
     );
   }
 
-  if (
-    currentRole &&
-    !["admin", "manager", "agent"].includes(
-      currentRole,
-    )
-  ) {
-    return (
-      <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
-        Your account has an unsupported role configuration.
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -455,14 +632,16 @@ export default function TeamPage() {
           </div>
 
           <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-400">
-            Manage the people working in your organization and control their CRM roles.
+            Manage the people working in your organization.
           </p>
         </div>
 
         {isAdmin ? (
           <button
             type="button"
-            onClick={openInviteModal}
+            onClick={
+              openInviteModal
+            }
             className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-ink-900 px-4 text-sm font-medium text-white transition hover:opacity-90"
           >
             <UserPlus className="size-4" />
@@ -471,7 +650,6 @@ export default function TeamPage() {
         ) : null}
       </div>
 
-      {/* Non-admin notice */}
       {!isAdmin ? (
         <div className="rounded-xl border border-border bg-surface px-4 py-3">
           <div className="flex items-start gap-3">
@@ -483,21 +661,20 @@ export default function TeamPage() {
               </p>
 
               <p className="mt-1 text-xs leading-5 text-ink-400">
-                You can view your organization team, but only an Admin can change member roles or invite new members.
+                You can view your organization team, but only an Admin can invite members or change roles.
               </p>
             </div>
           </div>
         </div>
       ) : null}
 
-      {/* Error */}
-      {error && !inviteOpen ? (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      {error &&
+      !inviteOpen ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-5 text-red-700">
           {error}
         </div>
       ) : null}
 
-      {/* Success */}
       {success ? (
         <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
           <Check className="size-4" />
@@ -505,7 +682,6 @@ export default function TeamPage() {
         </div>
       ) : null}
 
-      {/* Stats */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <TeamStat
           label="All members"
@@ -528,7 +704,6 @@ export default function TeamPage() {
         />
       </div>
 
-      {/* Members */}
       <section className="rounded-xl border border-border bg-surface">
         <div className="flex flex-col gap-3 border-b border-border p-4 lg:flex-row">
           <div className="relative flex-1">
@@ -617,7 +792,9 @@ export default function TeamPage() {
 
               <tbody className="divide-y divide-border">
                 {filteredMembers.map(
-                  (member) => {
+                  (
+                    member,
+                  ) => {
                     const isCurrentUser =
                       member.id ===
                       currentUserId;
@@ -628,27 +805,17 @@ export default function TeamPage() {
 
                     return (
                       <tr
-                        key={member.id}
+                        key={
+                          member.id
+                        }
                         className="text-sm"
                       >
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-3">
                             <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-sunken text-xs font-semibold text-ink-700">
-                              {member.full_name
-                                .trim()
-                                .split(/\s+/)
-                                .map(
-                                  (part) =>
-                                    part.charAt(
-                                      0,
-                                    ),
-                                )
-                                .join("")
-                                .slice(
-                                  0,
-                                  2,
-                                )
-                                .toUpperCase()}
+                              {getInitials(
+                                member.full_name,
+                              )}
                             </div>
 
                             <div className="min-w-0">
@@ -665,7 +832,7 @@ export default function TeamPage() {
                               </p>
 
                               <p className="mt-0.5 text-xs text-ink-400">
-                                Member
+                                Team member
                               </p>
                             </div>
                           </div>
@@ -689,9 +856,12 @@ export default function TeamPage() {
                           ).toLocaleDateString(
                             undefined,
                             {
-                              month: "short",
-                              day: "numeric",
-                              year: "numeric",
+                              month:
+                                "short",
+                              day:
+                                "numeric",
+                              year:
+                                "numeric",
                             },
                           )}
                         </td>
@@ -721,7 +891,9 @@ export default function TeamPage() {
                                   className="h-8 min-w-32 appearance-none rounded-lg border border-border bg-background px-3 pr-8 text-xs font-medium text-ink-700 outline-none disabled:opacity-60"
                                 >
                                   {ROLE_OPTIONS.map(
-                                    (role) => (
+                                    (
+                                      role,
+                                    ) => (
                                       <option
                                         key={
                                           role
@@ -763,11 +935,10 @@ export default function TeamPage() {
         )}
       </section>
 
-      {/* Role explanation */}
       <section className="grid gap-4 md:grid-cols-3">
         <RoleCard
           role="Admin"
-          description="Organization-wide control, team management, settings, and full CRM visibility."
+          description="Full organization control, team management, roles, and CRM visibility."
         />
 
         <RoleCard
@@ -781,14 +952,13 @@ export default function TeamPage() {
         />
       </section>
 
-      {/* Organization diagnostic */}
       {organizationId ? (
         <p className="text-[10px] text-ink-300">
-          Organization: {organizationId}
+          Organization:{" "}
+          {organizationId}
         </p>
       ) : null}
 
-      {/* Invite modal */}
       {inviteOpen ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6"
@@ -802,7 +972,6 @@ export default function TeamPage() {
           }}
         >
           <div className="w-full max-w-md overflow-hidden rounded-2xl border border-border bg-surface shadow-xl">
-            {/* Modal header */}
             <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
               <div>
                 <h2 className="text-base font-semibold text-ink-900">
@@ -829,7 +998,6 @@ export default function TeamPage() {
               </button>
             </div>
 
-            {/* Modal body */}
             <div className="space-y-4 p-5">
               <div className="space-y-2">
                 <label
@@ -850,7 +1018,9 @@ export default function TeamPage() {
                   }
                   placeholder="Michael Carter"
                   autoComplete="name"
-                  disabled={inviting}
+                  disabled={
+                    inviting
+                  }
                   className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-2 disabled:opacity-60"
                 />
               </div>
@@ -875,7 +1045,9 @@ export default function TeamPage() {
                   }
                   placeholder="michael@realty.com"
                   autoComplete="email"
-                  disabled={inviting}
+                  disabled={
+                    inviting
+                  }
                   className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-2 disabled:opacity-60"
                 />
               </div>
@@ -891,7 +1063,9 @@ export default function TeamPage() {
                 <div className="relative">
                   <select
                     id="invite-role"
-                    value={inviteRole}
+                    value={
+                      inviteRole
+                    }
                     onChange={(
                       event,
                     ) =>
@@ -935,7 +1109,6 @@ export default function TeamPage() {
               </div>
             </div>
 
-            {/* Modal footer */}
             <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
               <button
                 type="button"

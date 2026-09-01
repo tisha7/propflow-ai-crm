@@ -1,14 +1,7 @@
-import {
-  NextResponse,
-} from "next/server";
+import { NextResponse } from "next/server";
 
-import {
-  createClient,
-} from "@/lib/supabase/server";
-
-import {
-  supabaseAdmin,
-} from "@/lib/supabase/admin";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 
 type InviteRole =
   | "admin"
@@ -17,9 +10,24 @@ type InviteRole =
 
 type InvitePayload = {
   email?: string;
-  fullName?: string;
+  fullName?: string | null;
   role?: InviteRole;
 };
+
+function jsonError(
+  message: string,
+  status: number,
+) {
+  return NextResponse.json(
+    {
+      success: false,
+      error: message,
+    },
+    {
+      status,
+    },
+  );
+}
 
 export async function POST(
   request: Request,
@@ -32,8 +40,7 @@ export async function POST(
       data: {
         user,
       },
-      error:
-        authError,
+      error: authError,
     } =
       await supabase.auth.getUser();
 
@@ -41,19 +48,23 @@ export async function POST(
       authError ||
       !user
     ) {
-      return NextResponse.json(
-        {
-          error:
-            "Authentication required.",
-        },
-        {
-          status: 401,
-        },
+      return jsonError(
+        "Authentication required.",
+        401,
       );
     }
 
-    const body =
-      (await request.json()) as InvitePayload;
+    let body: InvitePayload;
+
+    try {
+      body =
+        (await request.json()) as InvitePayload;
+    } catch {
+      return jsonError(
+        "Invalid request body.",
+        400,
+      );
+    }
 
     const email =
       body.email
@@ -68,14 +79,9 @@ export async function POST(
       body.role ?? "agent";
 
     if (!email) {
-      return NextResponse.json(
-        {
-          error:
-            "Email address is required.",
-        },
-        {
-          status: 400,
-        },
+      return jsonError(
+        "Email address is required.",
+        400,
       );
     }
 
@@ -84,14 +90,9 @@ export async function POST(
         email,
       )
     ) {
-      return NextResponse.json(
-        {
-          error:
-            "Please enter a valid email address.",
-        },
-        {
-          status: 400,
-        },
+      return jsonError(
+        "Please enter a valid email address.",
+        400,
       );
     }
 
@@ -102,26 +103,21 @@ export async function POST(
         "agent",
       ].includes(role)
     ) {
-      return NextResponse.json(
-        {
-          error:
-            "Invalid team role.",
-        },
-        {
-          status: 400,
-        },
+      return jsonError(
+        "Invalid team role.",
+        400,
       );
     }
 
     const {
-      data: inviter,
+      data: inviterProfile,
       error:
-        inviterError,
+        inviterProfileError,
     } =
       await supabase
         .from("profiles")
         .select(
-          "organization_id, role",
+          "id, organization_id, role, full_name",
         )
         .eq(
           "id",
@@ -130,140 +126,158 @@ export async function POST(
         .single();
 
     if (
-      inviterError ||
-      !inviter
+      inviterProfileError ||
+      !inviterProfile
     ) {
-      return NextResponse.json(
-        {
-          error:
-            "Unable to resolve your organization.",
-        },
-        {
-          status: 403,
-        },
+      return jsonError(
+        inviterProfileError?.message ??
+          "Unable to resolve your organization profile.",
+        403,
       );
     }
 
     if (
-      inviter.role !==
+      inviterProfile.role !==
       "admin"
     ) {
-      return NextResponse.json(
-        {
-          error:
-            "Only an Admin can invite team members.",
-        },
-        {
-          status: 403,
-        },
+      return jsonError(
+        "Only an Admin can invite team members.",
+        403,
       );
     }
-
-    /*
-     * Check whether this email already has an
-     * Auth account in another organization/profile.
-     */
-    const {
-      data:
-        existingUsers,
-      error:
-        usersError,
-    } =
-      await supabaseAdmin.auth.admin.listUsers({
-        page: 1,
-        perPage: 1000,
-      });
-
-    if (usersError) {
-      return NextResponse.json(
-        {
-          error:
-            usersError.message,
-        },
-        {
-          status: 500,
-        },
-      );
-    }
-
-    const existingAuthUser =
-      existingUsers.users.find(
-        (item) =>
-          item.email
-            ?.toLowerCase() ===
-          email,
-      );
 
     if (
-      existingAuthUser
+      !inviterProfile.organization_id
     ) {
-      const {
-        data: existingProfile,
-      } =
-        await supabaseAdmin
-          .from("profiles")
-          .select(
-            "id, organization_id, role",
-          )
-          .eq(
-            "id",
-            existingAuthUser.id,
-          )
-          .maybeSingle();
+      return jsonError(
+        "Your account is not connected to an organization.",
+        403,
+      );
+    }
 
-      if (
-        existingProfile
-      ) {
-        return NextResponse.json(
-          {
-            error:
-              existingProfile.organization_id ===
-              inviter.organization_id
-                ? "This user is already a member of your organization."
-                : "This email already belongs to another PropFlow organization.",
-          },
-          {
-            status: 409,
-          },
-        );
-      }
+    let supabaseAdmin;
+
+    try {
+      supabaseAdmin =
+        createAdminClient();
+    } catch (error) {
+      return jsonError(
+        error instanceof Error
+          ? error.message
+          : "Server configuration error.",
+        500,
+      );
     }
 
     /*
-     * Remove any old/cancelled invitations for this
-     * organization/email before creating a fresh one.
+     * Prevent inviting an already-existing profile.
      */
-    await supabaseAdmin
-      .from("team_invitations")
-      .update({
-        status: "cancelled",
-        updated_at:
-          new Date().toISOString(),
-      })
-      .eq(
-        "organization_id",
-        inviter.organization_id,
-      )
-      .ilike(
-        "email",
-        email,
-      )
-      .eq(
-        "status",
-        "pending",
-      );
-
     const {
-      data:
-        invitation,
+      data: existingProfileByEmail,
+      error:
+        existingProfileError,
+    } =
+      await supabaseAdmin
+        .from("profiles")
+        .select(
+          "id, organization_id, role",
+        )
+        .ilike(
+          "email",
+          email,
+        )
+        .maybeSingle();
+
+    /*
+     * If profiles.email does not exist in the
+     * current schema, don't fail here. Auth lookup
+     * below remains authoritative.
+     */
+    if (
+      existingProfileError &&
+      !existingProfileError.message
+        .toLowerCase()
+        .includes("column")
+    ) {
+      return jsonError(
+        existingProfileError.message,
+        500,
+      );
+    }
+
+    if (
+      existingProfileByEmail
+    ) {
+      if (
+        existingProfileByEmail.organization_id ===
+        inviterProfile.organization_id
+      ) {
+        return jsonError(
+          "This user is already a member of your organization.",
+          409,
+        );
+      }
+
+      return jsonError(
+        "This email already belongs to another PropFlow organization.",
+        409,
+      );
+    }
+
+    /*
+     * Cancel previous pending invite.
+     */
+    const {
+      error:
+        cancelError,
+    } =
+      await supabaseAdmin
+        .from(
+          "team_invitations",
+        )
+        .update({
+          status:
+            "cancelled",
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq(
+          "organization_id",
+          inviterProfile.organization_id,
+        )
+        .ilike(
+          "email",
+          email,
+        )
+        .eq(
+          "status",
+          "pending",
+        );
+
+    if (
+      cancelError
+    ) {
+      return jsonError(
+        `Unable to prepare invitation: ${cancelError.message}`,
+        500,
+      );
+    }
+
+    /*
+     * Store trusted organization + role server-side.
+     */
+    const {
+      data: invitation,
       error:
         invitationError,
     } =
       await supabaseAdmin
-        .from("team_invitations")
+        .from(
+          "team_invitations",
+        )
         .insert({
           organization_id:
-            inviter.organization_id,
+            inviterProfile.organization_id,
           email,
           full_name:
             fullName,
@@ -278,29 +292,34 @@ export async function POST(
         )
         .single();
 
-    if (invitationError) {
-      return NextResponse.json(
-        {
-          error:
-            invitationError.message,
-        },
-        {
-          status: 500,
-        },
+    if (
+      invitationError
+    ) {
+      return jsonError(
+        `Unable to create invitation: ${invitationError.message}`,
+        500,
       );
     }
 
+    /*
+     * IMPORTANT:
+     * Redirect directly to the client invite page.
+     *
+     * Supabase may return invite session tokens
+     * in the URL fragment (#access_token=...).
+     * The client page can process that fragment.
+     */
     const origin =
       new URL(
         request.url,
       ).origin;
 
     const redirectTo =
-      `${origin}/auth/confirm?next=/auth/invite`;
+      `${origin}/auth/invite`;
 
     const {
       error:
-        inviteError,
+        authInviteError,
     } =
       await supabaseAdmin.auth.admin.inviteUserByEmail(
         email,
@@ -313,9 +332,13 @@ export async function POST(
         },
       );
 
-    if (inviteError) {
+    if (
+      authInviteError
+    ) {
       await supabaseAdmin
-        .from("team_invitations")
+        .from(
+          "team_invitations",
+        )
         .update({
           status:
             "cancelled",
@@ -327,41 +350,34 @@ export async function POST(
           invitation.id,
         );
 
-      return NextResponse.json(
-        {
-          error:
-            inviteError.message,
-        },
-        {
-          status: 400,
-        },
+      return jsonError(
+        `Unable to send invitation email: ${authInviteError.message}`,
+        400,
       );
     }
 
     return NextResponse.json(
       {
         success: true,
-        invitation,
         message:
           `Invitation sent to ${email}.`,
+        invitation,
+      },
+      {
+        status: 200,
       },
     );
   } catch (error) {
     console.error(
-      "Team invite error:",
+      "POST /api/team/invite:",
       error,
     );
 
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unable to send invitation.",
-      },
-      {
-        status: 500,
-      },
+    return jsonError(
+      error instanceof Error
+        ? error.message
+        : "Unexpected server error while sending invitation.",
+      500,
     );
   }
 }
